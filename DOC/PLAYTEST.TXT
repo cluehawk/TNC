@@ -1,0 +1,15 @@
+MANUAL PLAYTEST CHECKLIST
+=========================
+
+1. Start the program and confirm the 2x2 hub appears near the center.
+2. Move each prisoner one step and confirm new connected tiles generate.
+3. Leave an area behind and confirm unlit unoccupied tiles vanish.
+4. Find or force a crumbling tile. Enter it, then move away and confirm it becomes a pit.
+5. Stay on an armed crumbling tile and confirm the prisoner begins falling.
+6. On the falling prisoner's next turn, try a valid and an invalid re-entry edge.
+7. Move into line of sight of a monster and confirm lights-out plus draw loss.
+8. Move a lit prisoner adjacent to a lights-out prisoner and confirm relight.
+9. Spend nerve for an extra action and confirm the same prisoner acts again.
+10. Continue until draws reach zero and confirm final flickers begin.
+11. Spend nerve to cancel a final flicker, then skip the spend and confirm a lit tile is removed.
+12. Gather keys and stack all four keyed prisoners on a gate to confirm victory.

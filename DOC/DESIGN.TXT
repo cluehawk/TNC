@@ -1,0 +1,34 @@
+THE NIGHT CAGE - DOS PROTOTYPE
+==============================
+
+Toolchain
+---------
+Turbo Pascal 7 for DOS, 8086-compatible code generation.
+
+Prototype Scope
+---------------
+- 80x25 text mode only.
+- Single player controls all four prisoners.
+- Toroidal 18x12 maze board.
+- Lit tiles remain. Unlit unoccupied tiles vanish.
+- New tiles appear only when candlelight reaches empty connected space.
+- Finite draw stack. When exhausted, final flickers begin.
+
+Implemented Special Rules
+-------------------------
+- Key tiles grant one key automatically.
+- Gate tile wins only when all four keyed prisoners stand on the same gate.
+- Crumbling tiles arm on entry, drop to pits when left, and cause falling if stayed on.
+- Falling prisoners re-enter on their next turn from a chosen edge along the same row or column.
+- Wax eater attacks trace along straight connected passages and wrap across edges.
+- Lights-out prisoners cannot reveal new tiles.
+- Adjacency or sharing a tile with a lit prisoner relights a lights-out prisoner.
+- Nerve can queue extra actions, allow staying while lights out, brace against wax eaters,
+  and cancel one final-flicker loss.
+
+Simplifications
+---------------
+- Tile bag is weighted, not an exact tabletop tile inventory.
+- Monster chains are represented by counting all visible monsters along connected straight rays.
+- Final flickers remove one lit non-permanent non-occupied tile per turn.
+- Multiple prisoners may stack on one tile.
