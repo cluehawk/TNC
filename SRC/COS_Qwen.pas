@@ -300,8 +300,10 @@ BEGIN
 
             {Check for prisoners in path}
             FOR pId := 1 TO MAX_PRISONERS DO
+            BEGIN  { <-- ADDED }
               IF (prisoners[pId].x = tx) AND (prisoners[pId].y = ty) THEN
                 hitPrisoners := hitPrisoners + [pId];
+            END;   { <-- ADDED }
 
           UNTIL ((tx = px) AND (ty = py)) OR (drawStack <= 0);
         END;

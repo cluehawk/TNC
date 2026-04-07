@@ -18,24 +18,33 @@ begin
   Inc(G.TurnNumber);
 end;
 
-procedure PostActionUpdate(var G: TGameState; Index: Byte);
+procedure PostActionUpdate(var G: TGameState; Index, OldX, OldY: Byte; DidMove: Boolean);
 var
-  MonsterCount: Byte;
+  Victim: Byte;
+  VictimMask: Byte;
   Brace: Boolean;
 begin
   RebuildOccupancy(G);
   ResolveRelights(G);
   RecomputeLighting(G);
 
-  MonsterCount := CountMonsterSightings(G, Index);
-  if MonsterCount > 0 then
+  if DidMove then
+    VictimMask := WaxEscapeVictimMask(G, Index, OldX, OldY) or WaxContactVictimMask(G, Index)
+  else
+    VictimMask := WaxContactVictimMask(G, Index);
+
+  if VictimMask <> 0 then
   begin
-    DrawGame(G);
-    if G.Prisoners[Index].Nerve > 0 then
-      Brace := PromptYesNo('Wax eater sight line. Spend 1 nerve to brace?')
-    else
-      Brace := False;
-    ApplyMonsterHit(G, Index, MonsterCount, Brace);
+    for Victim := 0 to PrisonerCount - 1 do
+      if (VictimMask and (1 shl Victim)) <> 0 then
+      begin
+        DrawGame(G);
+        if G.Prisoners[Victim].Nerve > 0 then
+          Brace := PromptYesNo('Wax eater strikes ' + PrisonerName(Victim) + '. Spend nerve?')
+        else
+          Brace := False;
+        ApplyMonsterHit(G, Victim, 1, Brace);
+      end;
     ResolveRelights(G);
     RebuildOccupancy(G);
     RecomputeLighting(G);
@@ -53,9 +62,14 @@ var
   Cmd: Char;
   Dir: TDirection;
   Done: Boolean;
+  DidMove: Boolean;
+  OldX, OldY: Byte;
 begin
   ResolveOneAction := False;
   Done := False;
+  DidMove := False;
+  OldX := G.Prisoners[Index].X;
+  OldY := G.Prisoners[Index].Y;
   repeat
     DrawGame(G);
     GetAction(G, Cmd, Dir);
@@ -100,7 +114,10 @@ begin
               AddLog(G, 'No legal landing from that edge.');
           end
           else if MovePrisoner(G, Index, Dir) then
-            Done := True
+          begin
+            DidMove := True;
+            Done := True;
+          end
           else
             AddLog(G, 'No connected passage that way.');
         end;
@@ -109,7 +126,7 @@ begin
 
   if Done then
   begin
-    PostActionUpdate(G, Index);
+    PostActionUpdate(G, Index, OldX, OldY, DidMove);
     ResolveOneAction := True;
   end;
 end;

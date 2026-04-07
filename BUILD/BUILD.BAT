@@ -10,6 +10,7 @@ GOTO END
 :BUILDROOT
 CD ..
 CD SRC
+del *.tpu
 
 :BUILDLOCAL
 ECHO Building TNC.EXE with Turbo Pascal 7...

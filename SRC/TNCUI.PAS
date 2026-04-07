@@ -329,6 +329,7 @@ begin
     if Ch = #9 then
     begin
       G.ViewIndex := (G.ViewIndex + 1) mod PrisonerCount;
+      AddLog(G, 'Viewing ' + PrisonerName(G.ViewIndex) + ' in the side panel.');
       DrawGame(G);
     end;
     if Ch <> #9 then

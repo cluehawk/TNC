@@ -16,6 +16,8 @@ function HasAnyReEntry(const G: TGameState; Index: Byte): Boolean;
 function CanReEnterDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function ResolveFallingEntry(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function CountMonsterSightings(const G: TGameState; Index: Byte): Byte;
+function WaxEscapeVictimMask(const G: TGameState; ActiveIndex, OldX, OldY: Byte): Byte;
+function WaxContactVictimMask(const G: TGameState; Index: Byte): Byte;
 procedure ApplyMonsterHit(var G: TGameState; Index: Byte; Count: Byte; Brace: Boolean);
 procedure CollapseDarkness(var G: TGameState);
 function RemoveOneFlickerTile(var G: TGameState): Boolean;
@@ -107,18 +109,20 @@ begin
         G.Board[X, Y].Flags := G.Board[X, Y].Flags + [cfLit];
         G.Board[X, Y].LastLitTurn := G.TurnNumber;
         for D := dirNorth to dirWest do
+        begin
+          NX := WrapX(Integer(X) + DirX[D]);
+          NY := WrapY(Integer(Y) + DirY[D]);
           if CellOpen(G.Board[X, Y], D) then
           begin
-            NX := WrapX(Integer(X) + DirX[D]);
-            NY := WrapY(Integer(Y) + DirY[D]);
             if (not IsPresent(G.Board[NX, NY])) and (G.Phase = gpMaze) and (G.DrawsRemaining > 0) then
               GenerateCell(G, NX, NY);
-            if IsPresent(G.Board[NX, NY]) and CellOpen(G.Board[NX, NY], OppositeDir(D)) then
-            begin
-              G.Board[NX, NY].Flags := G.Board[NX, NY].Flags + [cfLit];
-              G.Board[NX, NY].LastLitTurn := G.TurnNumber;
-            end;
           end;
+          if IsPresent(G.Board[NX, NY]) then
+          begin
+            G.Board[NX, NY].Flags := G.Board[NX, NY].Flags + [cfLit];
+            G.Board[NX, NY].LastLitTurn := G.TurnNumber;
+          end;
+        end;
       end;
     end;
 end;
@@ -135,6 +139,11 @@ function TileBreaksOnUse(const Cell: TCell): Boolean;
 begin
   TileBreaksOnUse := (Cell.Kind = tkStart) or
                      (Cell.Feature in [ftKey, ftCrumbleFresh, ftCrumbleArmed]);
+end;
+
+function IsPitCell(const Cell: TCell): Boolean;
+begin
+  IsPitCell := IsPresent(Cell) and (Cell.Kind = tkPit);
 end;
 
 procedure HandleEntryFeature(var G: TGameState; Index: Byte);
@@ -187,7 +196,9 @@ begin
     Exit;
   end;
 
-  if IsPassable(G.Board[NX, NY]) and CellOpen(G.Board[NX, NY], OppositeDir(Dir)) then
+  if IsPitCell(G.Board[NX, NY]) then
+    CanMoveDirection := True
+  else if IsPassable(G.Board[NX, NY]) and CellOpen(G.Board[NX, NY], OppositeDir(Dir)) then
     CanMoveDirection := True;
 end;
 
@@ -216,6 +227,19 @@ begin
 
   G.Prisoners[Index].X := NX;
   G.Prisoners[Index].Y := NY;
+
+  if IsPitCell(G.Board[NX, NY]) then
+  begin
+    G.Prisoners[Index].Falling := True;
+    G.Prisoners[Index].Lit := False;
+    AddLog(G, PrisonerName(Index) + ' leaps into a pit and falls.');
+    MovePrisoner := True;
+    Exit;
+  end;
+
+  if not IsPassable(G.Board[NX, NY]) then
+    Exit;
+
   AddLog(G, PrisonerName(Index) + ' moves ' + DirName(Dir) + '.');
   HandleEntryFeature(G, Index);
   MovePrisoner := True;
@@ -240,6 +264,15 @@ begin
   X := G.Prisoners[Index].X;
   Y := G.Prisoners[Index].Y;
   AddLog(G, PrisonerName(Index) + ' stays put.');
+
+  if IsPitCell(G.Board[X, Y]) then
+  begin
+    G.Prisoners[Index].Falling := True;
+    G.Prisoners[Index].Lit := False;
+    AddLog(G, PrisonerName(Index) + ' falls from the pit.');
+    StayPrisoner := True;
+    Exit;
+  end;
 
   if TileBreaksOnUse(G.Board[X, Y]) then
   begin
@@ -414,6 +447,137 @@ begin
   for D := dirNorth to dirWest do
     Inc(Count, RayMonsterCount(G, G.Prisoners[Index].X, G.Prisoners[Index].Y, D));
   CountMonsterSightings := Count;
+end;
+
+function MonsterSeesCell(const G: TGameState; MX, MY, TX, TY: Byte; var HitDir: TDirection): Boolean;
+var
+  D: TDirection;
+  CX, CY, NX, NY, Limit, Step: Byte;
+  Blocked: Boolean;
+begin
+  MonsterSeesCell := False;
+  for D := dirNorth to dirWest do
+  begin
+    CX := MX;
+    CY := MY;
+    if (D = dirNorth) or (D = dirSouth) then
+      Limit := BoardH
+    else
+      Limit := BoardW;
+
+    Step := 0;
+    Blocked := False;
+    while (Step < Limit) and (not Blocked) do
+    begin
+      Inc(Step);
+      if (not IsPresent(G.Board[CX, CY])) or (not CellOpen(G.Board[CX, CY], D)) then
+        Blocked := True
+      else
+      begin
+        NX := WrapX(Integer(CX) + DirX[D]);
+        NY := WrapY(Integer(CY) + DirY[D]);
+        if (NX = TX) and (NY = TY) then
+        begin
+          HitDir := D;
+          MonsterSeesCell := True;
+          Exit;
+        end;
+        if (not IsPresent(G.Board[NX, NY])) or (G.Board[NX, NY].Kind = tkPit) then
+          Blocked := True
+        else if not CellOpen(G.Board[NX, NY], OppositeDir(D)) then
+          Blocked := True
+        else
+        begin
+          CX := NX;
+          CY := NY;
+        end;
+      end;
+    end;
+  end;
+end;
+
+function PrisonerAtCell(const G: TGameState; X, Y: Byte): Byte;
+var
+  I: Byte;
+begin
+  PrisonerAtCell := PrisonerCount;
+  for I := 0 to PrisonerCount - 1 do
+    if G.Prisoners[I].Alive and (not G.Prisoners[I].Falling) and
+       (G.Prisoners[I].X = X) and (G.Prisoners[I].Y = Y) then
+    begin
+      PrisonerAtCell := I;
+      Exit;
+    end;
+end;
+
+function FirstVictimOnRay(const G: TGameState; MX, MY: Byte; D: TDirection): Byte;
+var
+  CX, CY, NX, NY, Limit, Step, Victim: Byte;
+begin
+  FirstVictimOnRay := PrisonerCount;
+  CX := MX;
+  CY := MY;
+  if (D = dirNorth) or (D = dirSouth) then
+    Limit := BoardH
+  else
+    Limit := BoardW;
+
+  for Step := 1 to Limit do
+  begin
+    if (not IsPresent(G.Board[CX, CY])) or (not CellOpen(G.Board[CX, CY], D)) then
+      Exit;
+    NX := WrapX(Integer(CX) + DirX[D]);
+    NY := WrapY(Integer(CY) + DirY[D]);
+    if (not IsPresent(G.Board[NX, NY])) or (G.Board[NX, NY].Kind = tkPit) then
+      Exit;
+    if not CellOpen(G.Board[NX, NY], OppositeDir(D)) then
+      Exit;
+
+    Victim := PrisonerAtCell(G, NX, NY);
+    if Victim < PrisonerCount then
+    begin
+      FirstVictimOnRay := Victim;
+      Exit;
+    end;
+
+    CX := NX;
+    CY := NY;
+  end;
+end;
+
+function WaxEscapeVictimMask(const G: TGameState; ActiveIndex, OldX, OldY: Byte): Byte;
+var
+  X, Y, Victim: Byte;
+  Mask: Byte;
+  OldDir, NewDir: TDirection;
+begin
+  Mask := 0;
+  for X := 0 to BoardW - 1 do
+    for Y := 0 to BoardH - 1 do
+      if IsPresent(G.Board[X, Y]) and (G.Board[X, Y].Feature = ftMonster) then
+        if MonsterSeesCell(G, X, Y, OldX, OldY, OldDir) and
+           (not MonsterSeesCell(G, X, Y, G.Prisoners[ActiveIndex].X, G.Prisoners[ActiveIndex].Y, NewDir)) then
+        begin
+          Victim := FirstVictimOnRay(G, X, Y, OldDir);
+          if Victim < PrisonerCount then
+            Mask := Mask or (1 shl Victim);
+        end;
+  WaxEscapeVictimMask := Mask;
+end;
+
+function WaxContactVictimMask(const G: TGameState; Index: Byte): Byte;
+var
+  X, Y: Byte;
+begin
+  WaxContactVictimMask := 0;
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) then
+    Exit;
+
+  X := G.Prisoners[Index].X;
+  Y := G.Prisoners[Index].Y;
+  if IsPresent(G.Board[X, Y]) and (G.Board[X, Y].Kind <> tkPit) and
+     (G.Board[X, Y].Feature = ftMonster) then
+    WaxContactVictimMask := 1 shl Index;
 end;
 
 procedure ApplyMonsterHit(var G: TGameState; Index: Byte; Count: Byte; Brace: Boolean);
