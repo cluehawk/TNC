@@ -3,12 +3,13 @@ unit TNCDef;
 interface
 
 const
-  BoardW       = 18;
-  BoardH       = 12;
+  BoardW       = 6;
+  BoardH       = 6;
   PrisonerCount = 4;
   MaxLogLines  = 5;
   StartNerve   = 3;
-  InitialDraws = 96;
+  InitialDraws = 76;
+  MaxDrawTiles = 80;
 
 type
   TDirection = (dirNorth, dirEast, dirSouth, dirWest);
@@ -25,6 +26,11 @@ type
     Feature: TFeature;
     Flags: TCellFlags;
     LastLitTurn: Word;
+  end;
+
+  TDrawTile = record
+    Kind: TTileKind;
+    Feature: TFeature;
   end;
 
   TPrisoner = record
@@ -48,8 +54,9 @@ type
     TurnNumber: Word;
     DrawsRemaining: Word;
     Phase: TGamePhase;
+    PromptPlacement: Boolean;
     RNGSeed: Word;
-    ShapeBag: array[1..4] of Byte;
+    TileStack: array[1..MaxDrawTiles] of TDrawTile;
     FeatureKeys: Byte;
     FeatureGates: Byte;
     FeatureCrumbles: Byte;
@@ -169,7 +176,7 @@ end;
 
 function IsNearStartArea(X, Y: Byte): Boolean;
 begin
-  IsNearStartArea := (((X >= 6) and (X <= 11)) and ((Y >= 3) and (Y <= 8)));
+  IsNearStartArea := False;
 end;
 
 function PrisonerName(Index: Byte): string;

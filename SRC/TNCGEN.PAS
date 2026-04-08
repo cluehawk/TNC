@@ -3,37 +3,16 @@ unit TNCGen;
 interface
 
 uses
+  Crt,
   TNCDef,
   TNCRand;
 
 procedure InitGame(var G: TGameState);
 function CanGenerateCell(const G: TGameState; X, Y: Byte): Boolean;
 function GenerateCell(var G: TGameState; X, Y: Byte): Boolean;
+procedure DiscardDrawTiles(var G: TGameState; Count: Byte);
 
 implementation
-
-type
-  TCandidate = record
-    Kind: TTileKind;
-    Rot: Byte;
-    Weight: Byte;
-  end;
-
-function ShapeBagIndex(Kind: TTileKind): Byte;
-begin
-  case Kind of
-    tkStraight:  ShapeBagIndex := 1;
-    tkCorner:    ShapeBagIndex := 2;
-    tkTJunction: ShapeBagIndex := 3;
-  else
-    ShapeBagIndex := 4;
-  end;
-end;
-
-function ShapeWeight(const G: TGameState; Kind: TTileKind): Byte;
-begin
-  ShapeWeight := G.ShapeBag[ShapeBagIndex(Kind)];
-end;
 
 procedure SetStartCell(var G: TGameState; X, Y: Byte);
 begin
@@ -44,17 +23,123 @@ begin
   G.Board[X, Y].Flags := [cfPresent];
 end;
 
-procedure ResetBags(var G: TGameState);
+procedure ClearDrawTile(var T: TDrawTile);
 begin
-  G.ShapeBag[1] := 26;
-  G.ShapeBag[2] := 30;
-  G.ShapeBag[3] := 24;
-  G.ShapeBag[4] := 16;
+  T.Kind := tkVoid;
+  T.Feature := ftNone;
+end;
 
-  G.FeatureKeys := 6;
-  G.FeatureGates := 3;
-  G.FeatureCrumbles := 12;
-  G.FeatureMonsters := 8;
+procedure AddFeatureCounter(var G: TGameState; Feature: TFeature);
+begin
+  case Feature of
+    ftKey: Inc(G.FeatureKeys);
+    ftGate: Inc(G.FeatureGates);
+    ftCrumbleFresh, ftCrumbleArmed: Inc(G.FeatureCrumbles);
+    ftMonster: Inc(G.FeatureMonsters);
+  end;
+end;
+
+procedure RemoveFeatureCounter(var G: TGameState; Feature: TFeature; Lost: Boolean);
+begin
+  case Feature of
+    ftKey:
+      begin
+        if G.FeatureKeys > 0 then
+          Dec(G.FeatureKeys);
+        if Lost then
+          Inc(G.LostKeys);
+      end;
+    ftGate:
+      begin
+        if G.FeatureGates > 0 then
+          Dec(G.FeatureGates);
+        if Lost then
+          Inc(G.LostGates);
+      end;
+    ftCrumbleFresh, ftCrumbleArmed:
+      if G.FeatureCrumbles > 0 then
+        Dec(G.FeatureCrumbles);
+    ftMonster:
+      if G.FeatureMonsters > 0 then
+        Dec(G.FeatureMonsters);
+  end;
+end;
+
+procedure PushDrawTile(var G: TGameState; var Count: Byte; Kind: TTileKind; Feature: TFeature);
+begin
+  if Count >= MaxDrawTiles then
+    Exit;
+  Inc(Count);
+  G.TileStack[Count].Kind := Kind;
+  G.TileStack[Count].Feature := Feature;
+  AddFeatureCounter(G, Feature);
+end;
+
+procedure SwapDrawTiles(var A, B: TDrawTile);
+var
+  T: TDrawTile;
+begin
+  T := A;
+  A := B;
+  B := T;
+end;
+
+procedure ShuffleStackRange(var G: TGameState; First, Last: Byte);
+var
+  I, J: Byte;
+begin
+  if Last <= First then
+    Exit;
+  for I := First to Last do
+  begin
+    J := First + RandomRange(G.RNGSeed, Last - First + 1);
+    SwapDrawTiles(G.TileStack[I], G.TileStack[J]);
+  end;
+end;
+
+procedure BuildDrawStack(var G: TGameState);
+var
+  I: Byte;
+  Count: Byte;
+  OpeningFirst: Byte;
+begin
+  Count := 0;
+  G.FeatureKeys := 0;
+  G.FeatureGates := 0;
+  G.FeatureCrumbles := 0;
+  G.FeatureMonsters := 0;
+  for I := 1 to MaxDrawTiles do
+    ClearDrawTile(G.TileStack[I]);
+
+  { Core 1-4 prisoner pool after removing two key tiles.
+    Feature tiles keep a simple passage shape until manual tile choice exists. }
+  for I := 1 to 8 do
+    PushDrawTile(G, Count, tkStraight, ftCrumbleFresh);
+  for I := 1 to 26 do
+    PushDrawTile(G, Count, tkTJunction, ftNone);
+  for I := 1 to 2 do
+    PushDrawTile(G, Count, tkTJunction, ftCrumbleFresh);
+  for I := 1 to 10 do
+    PushDrawTile(G, Count, tkCross, ftNone);
+  for I := 1 to 6 do
+    PushDrawTile(G, Count, tkTJunction, ftKey);
+  for I := 1 to 4 do
+    PushDrawTile(G, Count, tkCross, ftGate);
+  for I := 1 to 12 do
+    PushDrawTile(G, Count, tkCross, ftMonster);
+
+  ShuffleStackRange(G, 1, Count);
+
+  OpeningFirst := Count + 1;
+  for I := 1 to 4 do
+    PushDrawTile(G, Count, tkTJunction, ftNone);
+  for I := 1 to 2 do
+    PushDrawTile(G, Count, tkCross, ftNone);
+  for I := 1 to 2 do
+    PushDrawTile(G, Count, tkStraight, ftCrumbleFresh);
+  ShuffleStackRange(G, OpeningFirst, Count);
+
+  G.DrawsRemaining := Count;
 end;
 
 function AxisDistance(A, B, Size: Byte): Byte;
@@ -80,7 +165,7 @@ begin
   for SX := 0 to BoardW - 1 do
     for SY := 0 to BoardH - 1 do
       if IsPresent(G.Board[SX, SY]) and (G.Board[SX, SY].Kind = tkStart) then
-        if (AxisDistance(X, SX, BoardW) + AxisDistance(Y, SY, BoardH)) <= 3 then
+        if (AxisDistance(X, SX, BoardW) + AxisDistance(Y, SY, BoardH)) <= 1 then
         begin
           NearStartTile := True;
           Exit;
@@ -98,7 +183,7 @@ begin
   for I := 0 to Count - 1 do
   begin
     Dist := AxisDistance(X, G.Prisoners[I].X, BoardW) + AxisDistance(Y, G.Prisoners[I].Y, BoardH);
-    if Dist < 6 then
+    if Dist < 3 then
     begin
       FarEnoughFromStarts := False;
       Exit;
@@ -142,130 +227,239 @@ begin
   CandidateLegal := CellWouldLegalOpen(G, X, Y, OpenMask(Kind, Rot));
 end;
 
+function MaxRotationForKind(Kind: TTileKind): Byte;
+begin
+  case Kind of
+    tkStraight: MaxRotationForKind := 1;
+    tkCross:    MaxRotationForKind := 0;
+  else
+    MaxRotationForKind := 3;
+  end;
+end;
+
+function DrawTileFits(const G: TGameState; X, Y: Byte; const Tile: TDrawTile; var Rot: Byte): Boolean;
+var
+  R, MaxRot: Byte;
+begin
+  DrawTileFits := False;
+  MaxRot := MaxRotationForKind(Tile.Kind);
+  for R := 0 to MaxRot do
+    if CandidateLegal(G, X, Y, Tile.Kind, R) then
+    begin
+      Rot := R;
+      DrawTileFits := True;
+      Exit;
+    end;
+end;
+
+function TileFeatureName(Feature: TFeature): string;
+begin
+  case Feature of
+    ftKey: TileFeatureName := 'key';
+    ftGate: TileFeatureName := 'gate';
+    ftCrumbleFresh, ftCrumbleArmed: TileFeatureName := 'crumble';
+    ftMonster: TileFeatureName := 'wax eater';
+  else
+    TileFeatureName := 'plain';
+  end;
+end;
+
+function TileKindName(Kind: TTileKind): string;
+begin
+  case Kind of
+    tkStraight:  TileKindName := 'straight';
+    tkCorner:    TileKindName := 'corner';
+    tkTJunction: TileKindName := 'T';
+    tkCross:     TileKindName := '4-way';
+  else
+    TileKindName := 'tile';
+  end;
+end;
+
+function RotationMaskText(Kind: TTileKind; Rot: Byte): string;
+var
+  Mask: Byte;
+  S: string[4];
+begin
+  Mask := OpenMask(Kind, Rot);
+  S := '';
+  if (Mask and DirMask(dirNorth)) <> 0 then
+    S := S + 'N';
+  if (Mask and DirMask(dirEast)) <> 0 then
+    S := S + 'E';
+  if (Mask and DirMask(dirSouth)) <> 0 then
+    S := S + 'S';
+  if (Mask and DirMask(dirWest)) <> 0 then
+    S := S + 'W';
+  RotationMaskText := S;
+end;
+
+function PreviewBoxChar(Code: Byte): Char;
+begin
+  PreviewBoxChar := Chr(Code);
+end;
+
+function PreviewPassageGlyph(Kind: TTileKind; Rot: Byte): Char;
+var
+  Mask: Byte;
+begin
+  Mask := OpenMask(Kind, Rot);
+  case Mask of
+     3: PreviewPassageGlyph := PreviewBoxChar(192);
+     5: PreviewPassageGlyph := PreviewBoxChar(179);
+     6: PreviewPassageGlyph := PreviewBoxChar(218);
+     7: PreviewPassageGlyph := PreviewBoxChar(195);
+     9: PreviewPassageGlyph := PreviewBoxChar(217);
+    10: PreviewPassageGlyph := PreviewBoxChar(196);
+    11: PreviewPassageGlyph := PreviewBoxChar(193);
+    12: PreviewPassageGlyph := PreviewBoxChar(191);
+    13: PreviewPassageGlyph := PreviewBoxChar(180);
+    14: PreviewPassageGlyph := PreviewBoxChar(194);
+    15: PreviewPassageGlyph := PreviewBoxChar(197);
+  else
+    PreviewPassageGlyph := '?';
+  end;
+end;
+
+function PreviewFeatureGlyph(Kind: TTileKind; Feature: TFeature): Char;
+begin
+  case Feature of
+    ftKey: PreviewFeatureGlyph := 'K';
+    ftGate: PreviewFeatureGlyph := 'G';
+    ftCrumbleFresh, ftCrumbleArmed: PreviewFeatureGlyph := '*';
+    ftMonster: PreviewFeatureGlyph := 'W';
+  else
+    if Kind = tkStart then
+      PreviewFeatureGlyph := 'S'
+    else
+      PreviewFeatureGlyph := ' ';
+  end;
+end;
+
+procedure DrawPreviewTile(X, Y: Byte; const Tile: TDrawTile; Rot: Byte);
+var
+  S: string[6];
+  Mask: Byte;
+begin
+  S := '      ';
+  S[3] := PreviewPassageGlyph(Tile.Kind, Rot);
+  S[4] := PreviewFeatureGlyph(Tile.Kind, Tile.Feature);
+  GotoXY(3 + X * 6, 3 + Y * 2);
+  Write(S);
+
+  S := '      ';
+  Mask := OpenMask(Tile.Kind, Rot);
+  if (Mask and DirMask(dirNorth)) <> 0 then
+    S[3] := '|';
+  if (Mask and DirMask(dirSouth)) <> 0 then
+    S[4] := '|';
+  if (Mask and DirMask(dirWest)) <> 0 then
+    S[2] := '-';
+  if (Mask and DirMask(dirEast)) <> 0 then
+    S[5] := '-';
+  GotoXY(3 + X * 6, 4 + Y * 2);
+  Write(S);
+end;
+
+procedure ClearPromptLines;
+begin
+  GotoXY(3, 23);
+  Write('                                                                          ');
+  GotoXY(3, 24);
+  Write('                                                                          ');
+end;
+
+function ChooseRotation(var G: TGameState; X, Y: Byte; const Tile: TDrawTile; DefaultRot: Byte): Byte;
+var
+  Rot, MaxRot: Byte;
+  Ch: Char;
+begin
+  Rot := DefaultRot;
+  MaxRot := MaxRotationForKind(Tile.Kind);
+  if not G.PromptPlacement then
+  begin
+    ChooseRotation := Rot;
+    Exit;
+  end;
+
+  repeat
+    DrawPreviewTile(X, Y, Tile, Rot);
+    ClearPromptLines;
+    GotoXY(3, 23);
+    Write('Draw ', TileKindName(Tile.Kind), ' ', TileFeatureName(Tile.Feature),
+          ' at ', X + 1, ',', Y + 1, '.');
+    GotoXY(3, 24);
+    if MaxRot = 0 then
+      Write('ENTER place   Open: ', RotationMaskText(Tile.Kind, Rot))
+    else
+      Write('R rotate  ENTER place   Open: ', RotationMaskText(Tile.Kind, Rot));
+    Ch := ReadKey;
+    if Ch = #0 then
+      Ch := ReadKey
+    else
+    begin
+      Ch := UpCase(Ch);
+      if (Ch = 'R') and (MaxRot > 0) then
+      begin
+        repeat
+          Rot := (Rot + 1) mod (MaxRot + 1);
+        until CandidateLegal(G, X, Y, Tile.Kind, Rot);
+      end;
+    end;
+  until (Ch = #13) or (Ch = ' ');
+
+  ClearPromptLines;
+  ChooseRotation := Rot;
+end;
+
+function DrawTopTile(var G: TGameState; var Tile: TDrawTile; Lost: Boolean): Boolean;
+begin
+  DrawTopTile := False;
+  if G.DrawsRemaining = 0 then
+    Exit;
+  Tile := G.TileStack[G.DrawsRemaining];
+  RemoveFeatureCounter(G, Tile.Feature, Lost);
+  ClearDrawTile(G.TileStack[G.DrawsRemaining]);
+  Dec(G.DrawsRemaining);
+  DrawTopTile := True;
+end;
+
+procedure DiscardDrawTiles(var G: TGameState; Count: Byte);
+var
+  I: Byte;
+  Tile: TDrawTile;
+begin
+  for I := 1 to Count do
+    if G.DrawsRemaining > 0 then
+      DrawTopTile(G, Tile, True);
+end;
+
 function CanGenerateCell(const G: TGameState; X, Y: Byte): Boolean;
 var
-  Kind: TTileKind;
-  Rot, MaxRot: Byte;
+  I: Word;
+  Rot: Byte;
 begin
   CanGenerateCell := False;
   if (G.Phase <> gpMaze) or (G.DrawsRemaining = 0) then
     Exit;
   if IsPresent(G.Board[X, Y]) then
-    Exit;
-
-  for Kind := tkStraight to tkCross do
-    if ShapeWeight(G, Kind) > 0 then
-    begin
-      if Kind = tkStraight then
-        MaxRot := 1
-      else if Kind = tkCross then
-        MaxRot := 0
-      else
-        MaxRot := 3;
-      for Rot := 0 to MaxRot do
-        if CandidateLegal(G, X, Y, Kind, Rot) then
-        begin
-          CanGenerateCell := True;
-          Exit;
-        end;
-    end;
-end;
-
-function FeatureAllowed(const G: TGameState; X, Y: Byte; Feature: TFeature): Boolean;
-begin
-  FeatureAllowed := True;
-  case Feature of
-    ftKey, ftGate, ftMonster:
-      if NearStartTile(G, X, Y) then
-        FeatureAllowed := False;
-    ftCrumbleFresh:
-      FeatureAllowed := True;
-  end;
-end;
-
-function ChooseFeature(var G: TGameState; X, Y: Byte): TFeature;
-var
-  PlainWeight: Word;
-  TotalWeight: Word;
-  Roll: Word;
-begin
-  PlainWeight := 1;
-  if G.DrawsRemaining > (G.FeatureKeys + G.FeatureGates + G.FeatureCrumbles + G.FeatureMonsters) then
-    PlainWeight := G.DrawsRemaining - (G.FeatureKeys + G.FeatureGates + G.FeatureCrumbles + G.FeatureMonsters);
-
-  TotalWeight := PlainWeight;
-  if (G.FeatureKeys > 0) and FeatureAllowed(G, X, Y, ftKey) then
-    Inc(TotalWeight, G.FeatureKeys);
-  if (G.FeatureGates > 0) and FeatureAllowed(G, X, Y, ftGate) then
-    Inc(TotalWeight, G.FeatureGates);
-  if (G.FeatureCrumbles > 0) and FeatureAllowed(G, X, Y, ftCrumbleFresh) then
-    Inc(TotalWeight, G.FeatureCrumbles);
-  if (G.FeatureMonsters > 0) and FeatureAllowed(G, X, Y, ftMonster) then
-    Inc(TotalWeight, G.FeatureMonsters);
-
-  Roll := RandomRange(G.RNGSeed, TotalWeight);
-  if Roll < PlainWeight then
   begin
-    ChooseFeature := ftNone;
+    CanGenerateCell := False;
     Exit;
   end;
-  Dec(Roll, PlainWeight);
 
-  if (G.FeatureKeys > 0) and FeatureAllowed(G, X, Y, ftKey) then
-  begin
-    if Roll < G.FeatureKeys then
+  for I := G.DrawsRemaining downto 1 do
+    if DrawTileFits(G, X, Y, G.TileStack[I], Rot) then
     begin
-      Dec(G.FeatureKeys);
-      ChooseFeature := ftKey;
+      CanGenerateCell := True;
       Exit;
     end;
-    Dec(Roll, G.FeatureKeys);
-  end;
-
-  if (G.FeatureGates > 0) and FeatureAllowed(G, X, Y, ftGate) then
-  begin
-    if Roll < G.FeatureGates then
-    begin
-      Dec(G.FeatureGates);
-      ChooseFeature := ftGate;
-      Exit;
-    end;
-    Dec(Roll, G.FeatureGates);
-  end;
-
-  if (G.FeatureCrumbles > 0) and FeatureAllowed(G, X, Y, ftCrumbleFresh) then
-  begin
-    if Roll < G.FeatureCrumbles then
-    begin
-      Dec(G.FeatureCrumbles);
-      ChooseFeature := ftCrumbleFresh;
-      Exit;
-    end;
-    Dec(Roll, G.FeatureCrumbles);
-  end;
-
-  if (G.FeatureMonsters > 0) and FeatureAllowed(G, X, Y, ftMonster) then
-  begin
-    if Roll < G.FeatureMonsters then
-    begin
-      Dec(G.FeatureMonsters);
-      ChooseFeature := ftMonster;
-      Exit;
-    end;
-  end;
-
-  ChooseFeature := ftNone;
 end;
 
 function GenerateCell(var G: TGameState; X, Y: Byte): Boolean;
 var
-  Candidates: array[0..15] of TCandidate;
-  Count: Byte;
-  TotalWeight: Word;
-  Roll: Word;
-  I: Byte;
-  Kind: TTileKind;
-  Rot, MaxRot: Byte;
+  Tile: TDrawTile;
+  Rot: Byte;
 begin
   GenerateCell := False;
   if (G.Phase <> gpMaze) or (G.DrawsRemaining = 0) then
@@ -276,54 +470,32 @@ begin
     Exit;
   end;
 
-  Count := 0;
-  TotalWeight := 0;
-  for Kind := tkStraight to tkCross do
-    if ShapeWeight(G, Kind) > 0 then
-    begin
-      if Kind = tkStraight then
-        MaxRot := 1
-      else if Kind = tkCross then
-        MaxRot := 0
-      else
-        MaxRot := 3;
-
-      for Rot := 0 to MaxRot do
-        if CandidateLegal(G, X, Y, Kind, Rot) then
-        begin
-          Candidates[Count].Kind := Kind;
-          Candidates[Count].Rot := Rot;
-          Candidates[Count].Weight := ShapeWeight(G, Kind);
-          Inc(TotalWeight, Candidates[Count].Weight);
-          Inc(Count);
-        end;
-    end;
-
-  if Count = 0 then
-    Exit;
-
-  Roll := RandomRange(G.RNGSeed, TotalWeight);
-  I := 0;
-  while I < Count do
+  while G.DrawsRemaining > 0 do
   begin
-    if Roll < Candidates[I].Weight then
-      Break;
-    Dec(Roll, Candidates[I].Weight);
-    Inc(I);
+    Tile := G.TileStack[G.DrawsRemaining];
+    if DrawTileFits(G, X, Y, Tile, Rot) then
+    begin
+      if not DrawTopTile(G, Tile, False) then
+        Exit;
+      Rot := ChooseRotation(G, X, Y, Tile, Rot);
+
+      ClearCell(G.Board[X, Y]);
+      G.Board[X, Y].Kind := Tile.Kind;
+      G.Board[X, Y].Rot := Rot;
+      G.Board[X, Y].Feature := Tile.Feature;
+      G.Board[X, Y].Flags := [cfPresent];
+      G.Board[X, Y].LastLitTurn := 0;
+
+      GenerateCell := True;
+      Exit;
+    end
+    else
+    begin
+      DrawTopTile(G, Tile, True);
+      AddLog(G, 'A drawn tile will not fit and is lost.');
+    end;
   end;
-  if I >= Count then
-    I := Count - 1;
 
-  ClearCell(G.Board[X, Y]);
-  G.Board[X, Y].Kind := Candidates[I].Kind;
-  G.Board[X, Y].Rot := Candidates[I].Rot;
-  G.Board[X, Y].Feature := ChooseFeature(G, X, Y);
-  G.Board[X, Y].Flags := [cfPresent];
-  G.Board[X, Y].LastLitTurn := 0;
-
-  Dec(G.ShapeBag[ShapeBagIndex(Candidates[I].Kind)]);
-  Dec(G.DrawsRemaining);
-  GenerateCell := True;
 end;
 
 procedure ClearBoard(var G: TGameState);
@@ -337,22 +509,24 @@ end;
 
 procedure InitGame(var G: TGameState);
 var
-  I: Byte;
-  X, Y: Byte;
+  I, J, Tmp: Byte;
+  BaseX, BaseY, HalfW, HalfH: Byte;
+  StartX, StartY: array[0..PrisonerCount - 1] of Byte;
 begin
   FillChar(G, SizeOf(G), 0);
   ClearBoard(G);
   ClearLog(G);
   InitSeedFromClock(G.RNGSeed);
-  G.DrawsRemaining := InitialDraws;
+  G.DrawsRemaining := 0;
   G.ActiveIndex := 0;
   G.ViewIndex := 0;
   G.TurnNumber := 1;
   G.Phase := gpMaze;
+  G.PromptPlacement := False;
   G.LostKeys := 0;
   G.LostGates := 0;
   G.FlickerCursor := 0;
-  ResetBags(G);
+  BuildDrawStack(G);
 
   for I := 0 to PrisonerCount - 1 do
   begin
@@ -364,16 +538,37 @@ begin
     G.Prisoners[I].Nerve := StartNerve;
   end;
 
+  HalfW := BoardW div 2;
+  HalfH := BoardH div 2;
+  BaseX := RandomRange(G.RNGSeed, HalfW);
+  BaseY := RandomRange(G.RNGSeed, HalfH);
+
+  StartX[0] := BaseX;
+  StartY[0] := BaseY;
+  StartX[1] := WrapX(Integer(BaseX) + HalfW);
+  StartY[1] := BaseY;
+  StartX[2] := BaseX;
+  StartY[2] := WrapY(Integer(BaseY) + HalfH);
+  StartX[3] := WrapX(Integer(BaseX) + HalfW);
+  StartY[3] := WrapY(Integer(BaseY) + HalfH);
+
+  { Shuffle prisoner assignment without risking an endless retry on 6x6. }
   for I := 0 to PrisonerCount - 1 do
   begin
-    repeat
-      X := RandomRange(G.RNGSeed, BoardW);
-      Y := RandomRange(G.RNGSeed, BoardH);
-    until (not IsPresent(G.Board[X, Y])) and FarEnoughFromStarts(G, X, Y, I);
+    J := RandomRange(G.RNGSeed, PrisonerCount);
+    Tmp := StartX[I];
+    StartX[I] := StartX[J];
+    StartX[J] := Tmp;
+    Tmp := StartY[I];
+    StartY[I] := StartY[J];
+    StartY[J] := Tmp;
+  end;
 
-    SetStartCell(G, X, Y);
-    G.Prisoners[I].X := X;
-    G.Prisoners[I].Y := Y;
+  for I := 0 to PrisonerCount - 1 do
+  begin
+    SetStartCell(G, StartX[I], StartY[I]);
+    G.Prisoners[I].X := StartX[I];
+    G.Prisoners[I].Y := StartY[I];
   end;
 
   AddLog(G, 'Four prisoners wake far apart in the dark.');

@@ -142,29 +142,64 @@ begin
   end;
 end;
 
+function CellVisible(const G: TGameState; X, Y: Byte): Boolean;
+begin
+  CellVisible := IsPresent(G.Board[X, Y]) and
+                 ((cfLit in G.Board[X, Y].Flags) or
+                  (cfOccupied in G.Board[X, Y].Flags) or
+                  (cfPermanent in G.Board[X, Y].Flags));
+end;
+
+function TileLine(const G: TGameState; X, Y, Line: Byte): string;
+var
+  S: string[6];
+begin
+  S := '      ';
+  if not CellVisible(G, X, Y) then
+  begin
+    TileLine := S;
+    Exit;
+  end;
+
+  if Line = 0 then
+  begin
+    S[3] := PassageGlyph(G.Board[X, Y]);
+    S[4] := OverlayGlyph(G, X, Y);
+  end
+  else
+  begin
+    if CellOpen(G.Board[X, Y], dirNorth) then
+      S[3] := '|';
+    if CellOpen(G.Board[X, Y], dirSouth) then
+      S[4] := '|';
+    if CellOpen(G.Board[X, Y], dirWest) then
+      S[2] := '-';
+    if CellOpen(G.Board[X, Y], dirEast) then
+      S[5] := '-';
+  end;
+
+  if G.Board[X, Y].Kind = tkPit then
+  begin
+    S := '  O   ';
+    if Line = 1 then
+      S := '      ';
+  end;
+  TileLine := S;
+end;
+
 procedure DrawBoard(const G: TGameState);
 var
   X, Y: Byte;
 begin
   DrawBox(1, 2, 40, 15);
-  WriteAt(3, 2, ' Board - Active ' + PrisonerName(G.ActiveIndex) + ' ');
+  WriteAt(3, 2, ' 6x6 Board - Active ' + PrisonerName(G.ActiveIndex) + ' ');
   for Y := 0 to BoardH - 1 do
     for X := 0 to BoardW - 1 do
     begin
-      GotoXY(2 + X * 2, 3 + Y);
-      if not IsPresent(G.Board[X, Y]) then
-      begin
-        Write(' ', ' ');
-      end
-      else if (cfLit in G.Board[X, Y].Flags) or (cfOccupied in G.Board[X, Y].Flags) or
-              (cfPermanent in G.Board[X, Y].Flags) then
-      begin
-        Write(PassageGlyph(G.Board[X, Y]), OverlayGlyph(G, X, Y));
-      end
-      else
-      begin
-        Write(' ', ' ');
-      end;
+      GotoXY(3 + X * 6, 3 + Y * 2);
+      Write(TileLine(G, X, Y, 0));
+      GotoXY(3 + X * 6, 4 + Y * 2);
+      Write(TileLine(G, X, Y, 1));
     end;
 end;
 

@@ -223,6 +223,7 @@ begin
   CollapseDarkness(Game);
   RebuildOccupancy(Game);
   CheckWinLoss(Game);
+  Game.PromptPlacement := True;
   GameLoop(Game);
   ShowEnding(Game);
 end.

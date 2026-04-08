@@ -14,7 +14,7 @@ del *.tpu
 
 :BUILDLOCAL
 ECHO Building TNC.EXE with Turbo Pascal 7...
-TPC /B /M /$G- /$R- /$S- TNC.PAS
+MSDOS.exe ..\BIN\TPC /B /M /$G- /$R- /$S- TNC.PAS
 GOTO END
 
 :END

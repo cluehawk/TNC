@@ -597,10 +597,7 @@ begin
     Loss := Count + 1;
 
   G.Prisoners[Index].Lit := False;
-  if G.DrawsRemaining > Loss then
-    Dec(G.DrawsRemaining, Loss)
-  else
-    G.DrawsRemaining := 0;
+  DiscardDrawTiles(G, Loss);
   AddLog(G, PrisonerName(Index) + ' is struck by wax eaters.');
 end;
 
