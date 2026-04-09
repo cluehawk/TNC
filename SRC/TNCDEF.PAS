@@ -7,7 +7,8 @@ const
   BoardH       = 6;
   PrisonerCount = 4;
   MaxLogLines  = 5;
-  StartNerve   = 3;
+  StartNerve   = 1;
+  MaxNerve     = 2;
   InitialDraws = 76;
   MaxDrawTiles = 80;
 
@@ -45,6 +46,8 @@ type
   end;
 
   TMessageStr = string[62];
+  TBoolGrid = array[0..BoardW - 1, 0..BoardH - 1] of Boolean;
+  TDirGrid = array[0..BoardW - 1, 0..BoardH - 1] of TDirection;
 
   TGameState = record
     Board: array[0..BoardW - 1, 0..BoardH - 1] of TCell;
@@ -53,6 +56,10 @@ type
     ViewIndex: Byte;
     TurnNumber: Word;
     DrawsRemaining: Word;
+    PendingStayMonster: Boolean;
+    PendingStayIndex: Byte;
+    PendingLandingMonster: Boolean;
+    PendingLandingIndex: Byte;
     Phase: TGamePhase;
     PromptPlacement: Boolean;
     RNGSeed: Word;
@@ -80,6 +87,7 @@ function DirMask(D: TDirection): Byte;
 function RotateMask(Mask: Byte; Rot: Byte): Byte;
 function OpenMask(Kind: TTileKind; Rot: Byte): Byte;
 function CellOpen(const Cell: TCell; D: TDirection): Boolean;
+function TileGlyph(Kind: TTileKind; Rot: Byte): Char;
 function IsPresent(const Cell: TCell): Boolean;
 function IsPassable(const Cell: TCell): Boolean;
 function IsNearStartArea(X, Y: Byte): Boolean;
@@ -162,6 +170,34 @@ end;
 function CellOpen(const Cell: TCell; D: TDirection): Boolean;
 begin
   CellOpen := (OpenMask(Cell.Kind, Cell.Rot) and DirMask(D)) <> 0;
+end;
+
+function TileGlyph(Kind: TTileKind; Rot: Byte): Char;
+var
+  Mask: Byte;
+begin
+  if Kind = tkPit then
+  begin
+    TileGlyph := 'O';
+    Exit;
+  end;
+
+  Mask := OpenMask(Kind, Rot);
+  case Mask of
+     3: TileGlyph := Chr(191);
+     5: TileGlyph := Chr(186);
+     6: TileGlyph := Chr(218);
+     7: TileGlyph := Chr(204);
+     9: TileGlyph := Chr(217);
+    10: TileGlyph := Chr(205);
+    11: TileGlyph := Chr(202);
+    12: TileGlyph := Chr(192);
+    13: TileGlyph := Chr(185);
+    14: TileGlyph := Chr(203);
+    15: TileGlyph := Chr(206);
+  else
+    TileGlyph := ' ';
+  end;
 end;
 
 function IsPresent(const Cell: TCell): Boolean;

@@ -18,20 +18,145 @@ begin
   Inc(G.TurnNumber);
 end;
 
+procedure ResolveStayMonsterReplacement(var G: TGameState; Index: Byte);
+var
+  Eligible: TBoolGrid;
+  Count: Byte;
+  SelX, SelY: Byte;
+begin
+  if not G.PendingStayMonster then
+    Exit;
+
+  BuildStayMonsterTargets(G, Index, Eligible, Count);
+  if Count = 0 then
+  begin
+    G.PendingStayMonster := False;
+    AddLog(G, 'No connected tile can be replaced by the wax eater.');
+    Exit;
+  end;
+
+  PromptSelectBoardCell(G, Eligible, 'Wax eater: choose a connected tile to replace.', SelX, SelY);
+  PlacePendingStayMonster(G, SelX, SelY);
+end;
+
+procedure RefreshAfterLanding(var G: TGameState);
+begin
+  RebuildOccupancy(G);
+  ResolveRelights(G);
+  RecomputeLighting(G);
+  CollapseDarkness(G);
+  RebuildOccupancy(G);
+  CheckPhaseTransitions(G);
+  CheckWinLoss(G);
+end;
+
+function ResolveLandingMonster(var G: TGameState; Index: Byte): Boolean;
+var
+  Brace: Boolean;
+  Cmd: Char;
+  Dir: TDirection;
+  MoveText: string;
+  HasScramble: Boolean;
+begin
+  ResolveLandingMonster := True;
+  if not G.PendingLandingMonster then
+    Exit;
+
+  G.PendingLandingMonster := False;
+  DrawGame(G);
+  if G.Prisoners[Index].Nerve > 0 then
+    Brace := PromptYesNo('Wax eater strikes on landing. Spend nerve?')
+  else
+    Brace := False;
+  ApplyMonsterHit(G, Index, 1, Brace);
+
+  HasScramble := CanLandingScrambleDirection(G, Index, dirNorth) or
+                 CanLandingScrambleDirection(G, Index, dirWest) or
+                 CanLandingScrambleDirection(G, Index, dirSouth) or
+                 CanLandingScrambleDirection(G, Index, dirEast);
+  if not HasScramble then
+  begin
+    G.Phase := gpLoss;
+    AddLog(G, PrisonerName(Index) + ' cannot scramble away from the landing monster.');
+    ResolveLandingMonster := False;
+    Exit;
+  end;
+
+  repeat
+    DrawGame(G);
+    MoveText := 'Scramble:';
+    if CanLandingScrambleDirection(G, Index, dirNorth) then
+      MoveText := MoveText + ' I';
+    if CanLandingScrambleDirection(G, Index, dirWest) then
+      MoveText := MoveText + ' J';
+    if CanLandingScrambleDirection(G, Index, dirSouth) then
+      MoveText := MoveText + ' K';
+    if CanLandingScrambleDirection(G, Index, dirEast) then
+      MoveText := MoveText + ' L';
+    WriteAt(3, 23, '                                                                            ');
+    WriteAt(3, 24, '                                                                            ');
+    WriteAt(3, 23, 'Landing hit: choose a scramble direction.');
+    WriteAt(3, 24, MoveText);
+    GetAction(G, Cmd, Dir);
+    if (Cmd = 'M') and ScrambleLandingPrisoner(G, Index, Dir) then
+      Break;
+  until False;
+
+  RefreshAfterLanding(G);
+  if G.Phase in [gpWin, gpLoss] then
+    ResolveLandingMonster := False;
+end;
+
+function ResolveFallingLanding(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
+var
+  EmptyEligible, ExistingEligible: TBoolGrid;
+  EmptyCount, ExistingCount: Byte;
+  SelX, SelY: Byte;
+begin
+  ResolveFallingLanding := False;
+  BuildFallingTargets(G, Index, Dir, EmptyEligible, ExistingEligible, EmptyCount, ExistingCount);
+
+  if (EmptyCount > 0) and (G.DrawsRemaining > 0) then
+    PromptSelectBoardCell(G, EmptyEligible, 'Choose an empty landing space on this line.', SelX, SelY)
+  else if ExistingCount > 0 then
+    PromptSelectBoardCell(G, ExistingEligible, 'No empty space: choose an existing landing tile.', SelX, SelY)
+  else
+    Exit;
+
+  if not LandFallingPrisoner(G, Index, SelX, SelY) then
+    Exit;
+
+  if G.PendingLandingMonster then
+  begin
+    if not ResolveLandingMonster(G, Index) then
+      Exit;
+  end
+  else
+    RefreshAfterLanding(G);
+
+  ResolveFallingLanding := True;
+end;
+
 procedure PostActionUpdate(var G: TGameState; Index, OldX, OldY: Byte; DidMove: Boolean);
 var
   Victim: Byte;
   VictimMask: Byte;
   Brace: Boolean;
+  RefreshBoard: Boolean;
 begin
+  RefreshBoard := DidMove or G.Prisoners[Index].Falling;
+
   RebuildOccupancy(G);
-  ResolveRelights(G);
-  RecomputeLighting(G);
+  if RefreshBoard then
+  begin
+    ResolveRelights(G);
+    RecomputeLighting(G);
+  end;
 
   if DidMove then
     VictimMask := WaxEscapeVictimMask(G, Index, OldX, OldY) or WaxContactVictimMask(G, Index)
   else
-    VictimMask := WaxContactVictimMask(G, Index);
+    VictimMask := 0;
 
   if VictimMask <> 0 then
   begin
@@ -45,14 +170,20 @@ begin
           Brace := False;
         ApplyMonsterHit(G, Victim, 1, Brace);
       end;
-    ResolveRelights(G);
-    RebuildOccupancy(G);
-    RecomputeLighting(G);
+    if RefreshBoard then
+    begin
+      ResolveRelights(G);
+      RebuildOccupancy(G);
+      RecomputeLighting(G);
+    end;
   end;
 
   RebuildOccupancy(G);
-  CollapseDarkness(G);
-  RebuildOccupancy(G);
+  if RefreshBoard then
+  begin
+    CollapseDarkness(G);
+    RebuildOccupancy(G);
+  end;
   CheckPhaseTransitions(G);
   CheckWinLoss(G);
 end;
@@ -100,7 +231,10 @@ begin
           if G.Prisoners[Index].Falling then
             AddLog(G, 'Choose a re-entry direction instead of staying.')
           else if StayPrisoner(G, Index) then
+          begin
+            ResolveStayMonsterReplacement(G, Index);
             Done := True
+          end
           else
             AddLog(G, 'That prisoner cannot stay in the dark without nerve.');
         end;
@@ -108,8 +242,13 @@ begin
         begin
           if G.Prisoners[Index].Falling then
           begin
-            if ResolveFallingEntry(G, Index, Dir) then
-              Done := True
+            if ResolveFallingLanding(G, Index, Dir) then
+            begin
+              OldX := G.Prisoners[Index].X;
+              OldY := G.Prisoners[Index].Y;
+              DidMove := False;
+              AddLog(G, PrisonerName(Index) + ' may now take the turn normally.');
+            end
             else
               AddLog(G, 'No legal landing from that edge.');
           end

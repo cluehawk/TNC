@@ -8,9 +8,13 @@ uses
   TNCRand;
 
 procedure InitGame(var G: TGameState);
-function CanGenerateCell(const G: TGameState; X, Y: Byte): Boolean;
-function GenerateCell(var G: TGameState; X, Y: Byte): Boolean;
+function CanGenerateCell(const G: TGameState; X, Y: Byte; RequiredDir: TDirection): Boolean;
+function GenerateCell(var G: TGameState; X, Y: Byte; RequiredDir: TDirection): Boolean;
+function PlaceIlluminationTile(var G: TGameState; const Eligible: TBoolGrid;
+  const RequiredDirs: TDirGrid): Boolean;
+function PlaceFreeTileAt(var G: TGameState; X, Y: Byte): Boolean;
 procedure DiscardDrawTiles(var G: TGameState; Count: Byte);
+function DrawTopTile(var G: TGameState; var Tile: TDrawTile; Lost: Boolean): Boolean;
 
 implementation
 
@@ -191,40 +195,20 @@ begin
   end;
 end;
 
-function CellWouldLegalOpen(const G: TGameState; X, Y: Byte; Mask: Byte): Boolean;
-var
-  D: TDirection;
-  NX, NY: Byte;
-  NCell: TCell;
+function CellWouldLegalOpen(const G: TGameState; X, Y: Byte; Mask: Byte; RequiredDir: TDirection): Boolean;
 begin
-  CellWouldLegalOpen := True;
-  for D := dirNorth to dirWest do
+  if (Mask and DirMask(RequiredDir)) = 0 then
   begin
-    NX := WrapX(Integer(X) + DirX[D]);
-    NY := WrapY(Integer(Y) + DirY[D]);
-    NCell := G.Board[NX, NY];
-    if IsPresent(NCell) then
-    begin
-      if CellOpen(NCell, OppositeDir(D)) then
-      begin
-        if (Mask and DirMask(D)) = 0 then
-        begin
-          CellWouldLegalOpen := False;
-          Exit;
-        end;
-      end
-      else if (Mask and DirMask(D)) <> 0 then
-      begin
-        CellWouldLegalOpen := False;
-        Exit;
-      end;
-    end;
+    CellWouldLegalOpen := False;
+    Exit;
   end;
+  CellWouldLegalOpen := True;
 end;
 
-function CandidateLegal(const G: TGameState; X, Y: Byte; Kind: TTileKind; Rot: Byte): Boolean;
+function CandidateLegal(const G: TGameState; X, Y: Byte; Kind: TTileKind; Rot: Byte;
+  RequiredDir: TDirection): Boolean;
 begin
-  CandidateLegal := CellWouldLegalOpen(G, X, Y, OpenMask(Kind, Rot));
+  CandidateLegal := CellWouldLegalOpen(G, X, Y, OpenMask(Kind, Rot), RequiredDir);
 end;
 
 function MaxRotationForKind(Kind: TTileKind): Byte;
@@ -237,14 +221,15 @@ begin
   end;
 end;
 
-function DrawTileFits(const G: TGameState; X, Y: Byte; const Tile: TDrawTile; var Rot: Byte): Boolean;
+function DrawTileFits(const G: TGameState; X, Y: Byte; const Tile: TDrawTile;
+  RequiredDir: TDirection; var Rot: Byte): Boolean;
 var
   R, MaxRot: Byte;
 begin
   DrawTileFits := False;
   MaxRot := MaxRotationForKind(Tile.Kind);
   for R := 0 to MaxRot do
-    if CandidateLegal(G, X, Y, Tile.Kind, R) then
+    if CandidateLegal(G, X, Y, Tile.Kind, R, RequiredDir) then
     begin
       Rot := R;
       DrawTileFits := True;
@@ -294,33 +279,6 @@ begin
   RotationMaskText := S;
 end;
 
-function PreviewBoxChar(Code: Byte): Char;
-begin
-  PreviewBoxChar := Chr(Code);
-end;
-
-function PreviewPassageGlyph(Kind: TTileKind; Rot: Byte): Char;
-var
-  Mask: Byte;
-begin
-  Mask := OpenMask(Kind, Rot);
-  case Mask of
-     3: PreviewPassageGlyph := PreviewBoxChar(192);
-     5: PreviewPassageGlyph := PreviewBoxChar(179);
-     6: PreviewPassageGlyph := PreviewBoxChar(218);
-     7: PreviewPassageGlyph := PreviewBoxChar(195);
-     9: PreviewPassageGlyph := PreviewBoxChar(217);
-    10: PreviewPassageGlyph := PreviewBoxChar(196);
-    11: PreviewPassageGlyph := PreviewBoxChar(193);
-    12: PreviewPassageGlyph := PreviewBoxChar(191);
-    13: PreviewPassageGlyph := PreviewBoxChar(180);
-    14: PreviewPassageGlyph := PreviewBoxChar(194);
-    15: PreviewPassageGlyph := PreviewBoxChar(197);
-  else
-    PreviewPassageGlyph := '?';
-  end;
-end;
-
 function PreviewFeatureGlyph(Kind: TTileKind; Feature: TFeature): Char;
 begin
   case Feature of
@@ -338,27 +296,23 @@ end;
 
 procedure DrawPreviewTile(X, Y: Byte; const Tile: TDrawTile; Rot: Byte);
 var
-  S: string[6];
-  Mask: Byte;
+  S: string[4];
 begin
-  S := '      ';
-  S[3] := PreviewPassageGlyph(Tile.Kind, Rot);
-  S[4] := PreviewFeatureGlyph(Tile.Kind, Tile.Feature);
-  GotoXY(3 + X * 6, 3 + Y * 2);
+  S := '    ';
+  S[2] := TileGlyph(Tile.Kind, Rot);
+  S[3] := PreviewFeatureGlyph(Tile.Kind, Tile.Feature);
+  GotoXY(2 + X * 5, 3 + Y * 2);
+  TextBackground(White);
+  TextColor(Black);
   Write(S);
+  TextBackground(Black);
+  TextColor(LightGray);
+end;
 
-  S := '      ';
-  Mask := OpenMask(Tile.Kind, Rot);
-  if (Mask and DirMask(dirNorth)) <> 0 then
-    S[3] := '|';
-  if (Mask and DirMask(dirSouth)) <> 0 then
-    S[4] := '|';
-  if (Mask and DirMask(dirWest)) <> 0 then
-    S[2] := '-';
-  if (Mask and DirMask(dirEast)) <> 0 then
-    S[5] := '-';
-  GotoXY(3 + X * 6, 4 + Y * 2);
-  Write(S);
+procedure ClearPreviewTile(X, Y: Byte);
+begin
+  GotoXY(2 + X * 5, 3 + Y * 2);
+  Write('    ');
 end;
 
 procedure ClearPromptLines;
@@ -369,7 +323,8 @@ begin
   Write('                                                                          ');
 end;
 
-function ChooseRotation(var G: TGameState; X, Y: Byte; const Tile: TDrawTile; DefaultRot: Byte): Byte;
+function ChooseRotation(var G: TGameState; X, Y: Byte; const Tile: TDrawTile;
+  RequiredDir: TDirection; DefaultRot: Byte): Byte;
 var
   Rot, MaxRot: Byte;
   Ch: Char;
@@ -403,13 +358,52 @@ begin
       begin
         repeat
           Rot := (Rot + 1) mod (MaxRot + 1);
-        until CandidateLegal(G, X, Y, Tile.Kind, Rot);
+        until CandidateLegal(G, X, Y, Tile.Kind, Rot, RequiredDir);
       end;
     end;
   until (Ch = #13) or (Ch = ' ');
 
   ClearPromptLines;
   ChooseRotation := Rot;
+end;
+
+function ChooseFreeRotation(var G: TGameState; X, Y: Byte; const Tile: TDrawTile): Byte;
+var
+  Rot, MaxRot: Byte;
+  Ch: Char;
+begin
+  Rot := 0;
+  MaxRot := MaxRotationForKind(Tile.Kind);
+  if not G.PromptPlacement then
+  begin
+    ChooseFreeRotation := Rot;
+    Exit;
+  end;
+
+  repeat
+    DrawPreviewTile(X, Y, Tile, Rot);
+    ClearPromptLines;
+    GotoXY(3, 23);
+    Write('Landing tile: ', TileKindName(Tile.Kind), ' ', TileFeatureName(Tile.Feature), '.');
+    GotoXY(3, 24);
+    if MaxRot = 0 then
+      Write('ENTER place   Open: ', RotationMaskText(Tile.Kind, Rot))
+    else
+      Write('R rotate  ENTER place   Open: ', RotationMaskText(Tile.Kind, Rot));
+    Ch := ReadKey;
+    if Ch = #0 then
+      Ch := ReadKey
+    else
+    begin
+      Ch := UpCase(Ch);
+      if (Ch = 'R') and (MaxRot > 0) then
+        Rot := (Rot + 1) mod (MaxRot + 1);
+    end;
+  until (Ch = #13) or (Ch = ' ');
+
+  ClearPreviewTile(X, Y);
+  ClearPromptLines;
+  ChooseFreeRotation := Rot;
 end;
 
 function DrawTopTile(var G: TGameState; var Tile: TDrawTile; Lost: Boolean): Boolean;
@@ -424,6 +418,131 @@ begin
   DrawTopTile := True;
 end;
 
+function PlaceIlluminationTile(var G: TGameState; const Eligible: TBoolGrid;
+  const RequiredDirs: TDirGrid): Boolean;
+var
+  Tile: TDrawTile;
+  Legal: TBoolGrid;
+  X, Y, SelX, SelY, OldX, OldY: Byte;
+  Count: Byte;
+  Rot, TrialRot: Byte;
+  Found: Boolean;
+  Ch: Char;
+begin
+  PlaceIlluminationTile := False;
+  if (G.Phase <> gpMaze) or (G.DrawsRemaining = 0) then
+    Exit;
+
+  while G.DrawsRemaining > 0 do
+  begin
+    Tile := G.TileStack[G.DrawsRemaining];
+    FillChar(Legal, SizeOf(Legal), 0);
+    Count := 0;
+    Found := False;
+
+    for Y := 0 to BoardH - 1 do
+      for X := 0 to BoardW - 1 do
+        if Eligible[X, Y] and DrawTileFits(G, X, Y, Tile, RequiredDirs[X, Y], TrialRot) then
+        begin
+          Legal[X, Y] := True;
+          Inc(Count);
+          if not Found then
+          begin
+            SelX := X;
+            SelY := Y;
+            Rot := TrialRot;
+            Found := True;
+          end;
+        end;
+
+    if Count = 0 then
+    begin
+      DrawTopTile(G, Tile, True);
+      AddLog(G, 'A drawn tile cannot fit any open space and is lost.');
+      Continue;
+    end;
+
+    if G.PromptPlacement then
+    begin
+      repeat
+        DrawPreviewTile(SelX, SelY, Tile, Rot);
+        ClearPromptLines;
+        GotoXY(3, 23);
+        Write('Top tile: ', TileKindName(Tile.Kind), ' ', TileFeatureName(Tile.Feature), '.');
+        GotoXY(3, 24);
+        Write('TAB target  R rotate  ENTER place');
+        Ch := ReadKey;
+        if Ch = #0 then
+          Ch := ReadKey
+        else
+        begin
+          Ch := UpCase(Ch);
+          if Ch = #9 then
+          begin
+            OldX := SelX;
+            OldY := SelY;
+            repeat
+              Inc(SelX);
+              if SelX >= BoardW then
+              begin
+                SelX := 0;
+                Inc(SelY);
+                if SelY >= BoardH then
+                  SelY := 0;
+              end;
+            until Legal[SelX, SelY];
+            ClearPreviewTile(OldX, OldY);
+            DrawTileFits(G, SelX, SelY, Tile, RequiredDirs[SelX, SelY], Rot);
+          end
+          else if Ch = 'R' then
+          begin
+            repeat
+              Rot := (Rot + 1) mod (MaxRotationForKind(Tile.Kind) + 1);
+            until CandidateLegal(G, SelX, SelY, Tile.Kind, Rot, RequiredDirs[SelX, SelY]);
+          end;
+        end;
+      until (Ch = #13) or (Ch = ' ');
+      ClearPreviewTile(SelX, SelY);
+      ClearPromptLines;
+    end;
+
+    if not DrawTopTile(G, Tile, False) then
+      Exit;
+
+    ClearCell(G.Board[SelX, SelY]);
+    G.Board[SelX, SelY].Kind := Tile.Kind;
+    G.Board[SelX, SelY].Rot := Rot;
+    G.Board[SelX, SelY].Feature := Tile.Feature;
+    G.Board[SelX, SelY].Flags := [cfPresent];
+    G.Board[SelX, SelY].LastLitTurn := 0;
+    PlaceIlluminationTile := True;
+    Exit;
+  end;
+end;
+
+function PlaceFreeTileAt(var G: TGameState; X, Y: Byte): Boolean;
+var
+  Tile: TDrawTile;
+  Rot: Byte;
+begin
+  PlaceFreeTileAt := False;
+  if (G.Phase <> gpMaze) or (G.DrawsRemaining = 0) then
+    Exit;
+  if IsPresent(G.Board[X, Y]) then
+    Exit;
+  if not DrawTopTile(G, Tile, False) then
+    Exit;
+
+  Rot := ChooseFreeRotation(G, X, Y, Tile);
+  ClearCell(G.Board[X, Y]);
+  G.Board[X, Y].Kind := Tile.Kind;
+  G.Board[X, Y].Rot := Rot;
+  G.Board[X, Y].Feature := Tile.Feature;
+  G.Board[X, Y].Flags := [cfPresent];
+  G.Board[X, Y].LastLitTurn := 0;
+  PlaceFreeTileAt := True;
+end;
+
 procedure DiscardDrawTiles(var G: TGameState; Count: Byte);
 var
   I: Byte;
@@ -434,7 +553,7 @@ begin
       DrawTopTile(G, Tile, True);
 end;
 
-function CanGenerateCell(const G: TGameState; X, Y: Byte): Boolean;
+function CanGenerateCell(const G: TGameState; X, Y: Byte; RequiredDir: TDirection): Boolean;
 var
   I: Word;
   Rot: Byte;
@@ -449,14 +568,14 @@ begin
   end;
 
   for I := G.DrawsRemaining downto 1 do
-    if DrawTileFits(G, X, Y, G.TileStack[I], Rot) then
+    if DrawTileFits(G, X, Y, G.TileStack[I], RequiredDir, Rot) then
     begin
       CanGenerateCell := True;
       Exit;
     end;
 end;
 
-function GenerateCell(var G: TGameState; X, Y: Byte): Boolean;
+function GenerateCell(var G: TGameState; X, Y: Byte; RequiredDir: TDirection): Boolean;
 var
   Tile: TDrawTile;
   Rot: Byte;
@@ -473,11 +592,11 @@ begin
   while G.DrawsRemaining > 0 do
   begin
     Tile := G.TileStack[G.DrawsRemaining];
-    if DrawTileFits(G, X, Y, Tile, Rot) then
+    if DrawTileFits(G, X, Y, Tile, RequiredDir, Rot) then
     begin
       if not DrawTopTile(G, Tile, False) then
         Exit;
-      Rot := ChooseRotation(G, X, Y, Tile, Rot);
+      Rot := ChooseRotation(G, X, Y, Tile, RequiredDir, Rot);
 
       ClearCell(G.Board[X, Y]);
       G.Board[X, Y].Kind := Tile.Kind;

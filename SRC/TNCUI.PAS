@@ -11,6 +11,8 @@ procedure TitleScreen;
 procedure DrawGame(const G: TGameState);
 procedure GetAction(var G: TGameState; var Cmd: Char; var Dir: TDirection);
 function PromptYesNo(const Prompt: string): Boolean;
+procedure PromptSelectBoardCell(const G: TGameState; const Eligible: TBoolGrid;
+  const Prompt: string; var SelX, SelY: Byte);
 procedure WaitForKey;
 procedure WriteAt(X, Y: Byte; S: string);
 
@@ -60,41 +62,6 @@ begin
   Write(BoxChar(217));
 end;
 
-function PassageGlyph(const Cell: TCell): Char;
-var
-  Mask: Byte;
-begin
-  if not IsPresent(Cell) then
-  begin
-    PassageGlyph := ' ';
-    Exit;
-  end;
-
-  if Cell.Kind = tkPit then
-  begin
-    PassageGlyph := 'O';
-    Exit;
-  end;
-
-  Mask := OpenMask(Cell.Kind, Cell.Rot);
-  case Mask of
-     0: PassageGlyph := ' ';
-     3: PassageGlyph := BoxChar(192);
-     5: PassageGlyph := BoxChar(179);
-     6: PassageGlyph := BoxChar(218);
-     7: PassageGlyph := BoxChar(195);
-     9: PassageGlyph := BoxChar(217);
-    10: PassageGlyph := BoxChar(196);
-    11: PassageGlyph := BoxChar(193);
-    12: PassageGlyph := BoxChar(191);
-    13: PassageGlyph := BoxChar(180);
-    14: PassageGlyph := BoxChar(194);
-    15: PassageGlyph := BoxChar(197);
-  else
-    PassageGlyph := '?';
-  end;
-end;
-
 function OverlayGlyph(const G: TGameState; X, Y: Byte): Char;
 var
   I, Count, LastSeen: Byte;
@@ -116,10 +83,7 @@ begin
   end;
   if Count = 1 then
   begin
-    if LastSeen = G.ActiveIndex then
-      OverlayGlyph := '@'
-    else
-      OverlayGlyph := Char(Ord('1') + LastSeen);
+    OverlayGlyph := Char(Ord('1') + LastSeen);
     Exit;
   end;
 
@@ -142,6 +106,14 @@ begin
   end;
 end;
 
+function ActivePrisonerAtCell(const G: TGameState; X, Y: Byte): Boolean;
+begin
+  ActivePrisonerAtCell := G.Prisoners[G.ActiveIndex].Alive and
+                          (not G.Prisoners[G.ActiveIndex].Falling) and
+                          (G.Prisoners[G.ActiveIndex].X = X) and
+                          (G.Prisoners[G.ActiveIndex].Y = Y);
+end;
+
 function CellVisible(const G: TGameState; X, Y: Byte): Boolean;
 begin
   CellVisible := IsPresent(G.Board[X, Y]) and
@@ -152,55 +124,81 @@ end;
 
 function TileLine(const G: TGameState; X, Y, Line: Byte): string;
 var
-  S: string[6];
+  S: string[4];
 begin
-  S := '      ';
+  S := '    ';
   if not CellVisible(G, X, Y) then
   begin
     TileLine := S;
     Exit;
   end;
 
-  if Line = 0 then
-  begin
-    S[3] := PassageGlyph(G.Board[X, Y]);
-    S[4] := OverlayGlyph(G, X, Y);
-  end
-  else
-  begin
-    if CellOpen(G.Board[X, Y], dirNorth) then
-      S[3] := '|';
-    if CellOpen(G.Board[X, Y], dirSouth) then
-      S[4] := '|';
-    if CellOpen(G.Board[X, Y], dirWest) then
-      S[2] := '-';
-    if CellOpen(G.Board[X, Y], dirEast) then
-      S[5] := '-';
-  end;
-
-  if G.Board[X, Y].Kind = tkPit then
-  begin
-    S := '  O   ';
-    if Line = 1 then
-      S := '      ';
-  end;
+  S[2] := TileGlyph(G.Board[X, Y].Kind, G.Board[X, Y].Rot);
+  S[3] := OverlayGlyph(G, X, Y);
   TileLine := S;
 end;
 
 procedure DrawBoard(const G: TGameState);
 var
-  X, Y: Byte;
+  X, Y, Row: Byte;
+  ChLeft, ChMid, ChRight: Char;
 begin
-  DrawBox(1, 2, 40, 15);
-  WriteAt(3, 2, ' 6x6 Board - Active ' + PrisonerName(G.ActiveIndex) + ' ');
-  for Y := 0 to BoardH - 1 do
+  WriteAt(2, 1, '6x6 Board - Active ' + PrisonerName(G.ActiveIndex) + ' ');
+
+  for Y := 0 to BoardH do
+  begin
+    if Y = 0 then
+    begin
+      ChLeft := BoxChar(218);
+      ChMid := BoxChar(194);
+      ChRight := BoxChar(191);
+    end
+    else if Y = BoardH then
+    begin
+      ChLeft := BoxChar(192);
+      ChMid := BoxChar(193);
+      ChRight := BoxChar(217);
+    end
+    else
+    begin
+      ChLeft := BoxChar(195);
+      ChMid := BoxChar(197);
+      ChRight := BoxChar(180);
+    end;
+
+    Row := 2 + Y * 2;
+    GotoXY(1, Row);
+    Write(ChLeft);
     for X := 0 to BoardW - 1 do
     begin
-      GotoXY(3 + X * 6, 3 + Y * 2);
-      Write(TileLine(G, X, Y, 0));
-      GotoXY(3 + X * 6, 4 + Y * 2);
-      Write(TileLine(G, X, Y, 1));
+      Write(BoxChar(196), BoxChar(196), BoxChar(196), BoxChar(196));
+      if X < BoardW - 1 then
+        Write(ChMid)
+      else
+        Write(ChRight);
     end;
+
+    if Y < BoardH then
+    begin
+      Row := 3 + Y * 2;
+      GotoXY(1, Row);
+      for X := 0 to BoardW - 1 do
+      begin
+        Write(BoxChar(179));
+        if ActivePrisonerAtCell(G, X, Y) then
+        begin
+          TextBackground(White);
+          TextColor(Black);
+          Write(TileLine(G, X, Y, 0));
+          TextBackground(Black);
+          TextColor(LightGray);
+        end
+        else
+          Write(TileLine(G, X, Y, 0));
+      end;
+      Write(BoxChar(179));
+    end;
+  end;
 end;
 
 procedure DrawPrisonerLine(const G: TGameState; Row, Index: Byte);
@@ -229,7 +227,7 @@ begin
   else
     S := S + '     ';
 
-  WriteAt(43, Row, S + '                    ');
+  WriteAt(35, Row, S + '                            ');
 end;
 
 procedure DrawSide(const G: TGameState);
@@ -237,32 +235,32 @@ var
   I, V: Byte;
   S: string;
 begin
-  DrawBox(41, 2, 80, 15);
-  WriteAt(43, 2, ' Status ');
-  WriteAt(43, 3, '>> ' + PrisonerName(G.ActiveIndex) + ' TURN <<                    ');
-  WriteAt(43, 4, 'Turn ' + NumStr(G.TurnNumber) + '  Draw ' + NumStr(G.DrawsRemaining) + '               ');
-  WriteAt(43, 5, 'Phase: ' + PhaseName(G.Phase) + '                          ');
+  DrawBox(33, 2, 80, 15);
+  WriteAt(35, 2, ' Status ');
+  WriteAt(35, 3, '>> ' + PrisonerName(G.ActiveIndex) + ' TURN <<                            ');
+  WriteAt(35, 4, 'Turn ' + NumStr(G.TurnNumber) + '  Draw ' + NumStr(G.DrawsRemaining) + '                       ');
+  WriteAt(35, 5, 'Phase: ' + PhaseName(G.Phase) + '                                  ');
   V := G.ViewIndex;
-  WriteAt(43, 6, 'View : ' + PrisonerName(V) + '                           ');
+  WriteAt(35, 6, 'View : ' + PrisonerName(V) + '                                   ');
 
   if G.Prisoners[V].Falling then
     S := 'falling'
   else
     S := NumStr(G.Prisoners[V].X) + ',' + NumStr(G.Prisoners[V].Y);
-  WriteAt(43, 7, 'Pos  : ' + S + '                            ');
+  WriteAt(35, 7, 'Pos  : ' + S + '                                    ');
 
   if G.Prisoners[V].Lit then
-    WriteAt(43, 8, 'Light: lit                            ')
+    WriteAt(35, 8, 'Light: lit                                    ')
   else
-    WriteAt(43, 8, 'Light: lights out                     ');
+    WriteAt(35, 8, 'Light: lights out                             ');
 
   if G.Prisoners[V].HasKey then
     S := 'yes'
   else
     S := 'no';
-  WriteAt(43, 9, 'Key  : ' + S + '   Nerve: ' + NumStr(G.Prisoners[V].Nerve) + '                 ');
+  WriteAt(35, 9, 'Key  : ' + S + '   Nerve: ' + NumStr(G.Prisoners[V].Nerve) + '                         ');
 
-  WriteAt(43, 10, 'Party');
+  WriteAt(35, 10, 'Party');
   for I := 0 to PrisonerCount - 1 do
     DrawPrisonerLine(G, 11 + I, I);
 end;
@@ -287,7 +285,7 @@ begin
     for I := StartLine to G.LogCount - 1 do
       WriteAt(3, 17 + (I - StartLine), LogMessage(G, I));
 
-  WriteAt(3, 20, 'Legend: @ active 1-4 others + stack  S start  K key  G gate');
+  WriteAt(3, 20, 'Legend: inverse turn 1-4 prisoners + stack  S start  K key');
   WriteAt(3, 21, '        W wax eater  * crumble  O pit  blank = darkness');
   WriteAt(3, 22, 'Turn now: >> ' + PrisonerName(G.ActiveIndex) + ' <<');
 
@@ -406,6 +404,58 @@ begin
     Ch := UpCase(ReadKey);
   until Ch in ['Y', 'N'];
   PromptYesNo := Ch = 'Y';
+end;
+
+procedure PromptSelectBoardCell(const G: TGameState; const Eligible: TBoolGrid;
+  const Prompt: string; var SelX, SelY: Byte);
+var
+  X, Y: Byte;
+  Found: Boolean;
+  Ch: Char;
+begin
+  Found := False;
+  for Y := 0 to BoardH - 1 do
+    for X := 0 to BoardW - 1 do
+      if Eligible[X, Y] then
+      begin
+        SelX := X;
+        SelY := Y;
+        Found := True;
+        Break;
+      end;
+
+  if not Found then
+    Exit;
+
+  repeat
+    DrawGame(G);
+    HighVideo;
+    TextBackground(White);
+    TextColor(Black);
+    GotoXY(2 + SelX * 5, 3 + SelY * 2);
+    Write(TileLine(G, SelX, SelY, 0));
+    TextBackground(Black);
+    TextColor(LightGray);
+    NormVideo;
+    WriteAt(3, 23, '                                                                            ');
+    WriteAt(3, 24, '                                                                            ');
+    WriteAt(3, 23, Prompt);
+    WriteAt(3, 24, 'TAB cycle target   ENTER place wax eater');
+    Ch := ReadKey;
+    if Ch = #9 then
+    begin
+      repeat
+        Inc(SelX);
+        if SelX >= BoardW then
+        begin
+          SelX := 0;
+          Inc(SelY);
+          if SelY >= BoardH then
+            SelY := 0;
+        end;
+      until Eligible[SelX, SelY];
+    end;
+  until Ch = #13;
 end;
 
 procedure WaitForKey;

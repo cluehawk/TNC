@@ -15,9 +15,17 @@ function StayPrisoner(var G: TGameState; Index: Byte): Boolean;
 function HasAnyReEntry(const G: TGameState; Index: Byte): Boolean;
 function CanReEnterDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function ResolveFallingEntry(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
+procedure BuildFallingTargets(const G: TGameState; Index: Byte; Dir: TDirection;
+  var EmptyEligible, ExistingEligible: TBoolGrid; var EmptyCount, ExistingCount: Byte);
+function LandFallingPrisoner(var G: TGameState; Index, X, Y: Byte): Boolean;
+function CanLandingScrambleDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
+function ScrambleLandingPrisoner(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function CountMonsterSightings(const G: TGameState; Index: Byte): Byte;
 function WaxEscapeVictimMask(const G: TGameState; ActiveIndex, OldX, OldY: Byte): Byte;
 function WaxContactVictimMask(const G: TGameState; Index: Byte): Byte;
+procedure BuildStayMonsterTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
+  var Count: Byte);
+procedure PlacePendingStayMonster(var G: TGameState; X, Y: Byte);
 procedure ApplyMonsterHit(var G: TGameState; Index: Byte; Count: Byte; Brace: Boolean);
 procedure CollapseDarkness(var G: TGameState);
 function RemoveOneFlickerTile(var G: TGameState): Boolean;
@@ -94,37 +102,53 @@ var
   X, Y, I: Byte;
   D: TDirection;
   NX, NY: Byte;
+  Eligible: TBoolGrid;
+  RequiredDirs: TDirGrid;
+  Count: Byte;
 begin
-  for X := 0 to BoardW - 1 do
-    for Y := 0 to BoardH - 1 do
-      G.Board[X, Y].Flags := G.Board[X, Y].Flags - [cfLit];
+  repeat
+    for X := 0 to BoardW - 1 do
+      for Y := 0 to BoardH - 1 do
+        G.Board[X, Y].Flags := G.Board[X, Y].Flags - [cfLit];
 
-  for I := 0 to PrisonerCount - 1 do
-    if G.Prisoners[I].Alive and G.Prisoners[I].Lit and (not G.Prisoners[I].Falling) then
-    begin
-      X := G.Prisoners[I].X;
-      Y := G.Prisoners[I].Y;
-      if IsPresent(G.Board[X, Y]) then
+    FillChar(Eligible, SizeOf(Eligible), 0);
+    Count := 0;
+
+    for I := 0 to PrisonerCount - 1 do
+      if G.Prisoners[I].Alive and G.Prisoners[I].Lit and (not G.Prisoners[I].Falling) then
       begin
-        G.Board[X, Y].Flags := G.Board[X, Y].Flags + [cfLit];
-        G.Board[X, Y].LastLitTurn := G.TurnNumber;
-        for D := dirNorth to dirWest do
+        X := G.Prisoners[I].X;
+        Y := G.Prisoners[I].Y;
+        if IsPresent(G.Board[X, Y]) then
         begin
-          NX := WrapX(Integer(X) + DirX[D]);
-          NY := WrapY(Integer(Y) + DirY[D]);
-          if CellOpen(G.Board[X, Y], D) then
+          G.Board[X, Y].Flags := G.Board[X, Y].Flags + [cfLit];
+          G.Board[X, Y].LastLitTurn := G.TurnNumber;
+          for D := dirNorth to dirWest do
           begin
-            if (not IsPresent(G.Board[NX, NY])) and (G.Phase = gpMaze) and (G.DrawsRemaining > 0) then
-              GenerateCell(G, NX, NY);
-          end;
-          if IsPresent(G.Board[NX, NY]) then
-          begin
-            G.Board[NX, NY].Flags := G.Board[NX, NY].Flags + [cfLit];
-            G.Board[NX, NY].LastLitTurn := G.TurnNumber;
+            NX := WrapX(Integer(X) + DirX[D]);
+            NY := WrapY(Integer(Y) + DirY[D]);
+            if CellOpen(G.Board[X, Y], D) and (not IsPresent(G.Board[NX, NY])) and
+               (G.Phase = gpMaze) and (G.DrawsRemaining > 0) then
+            begin
+              if not Eligible[NX, NY] then
+              begin
+                Eligible[NX, NY] := True;
+                RequiredDirs[NX, NY] := OppositeDir(D);
+                Inc(Count);
+              end;
+            end;
+            if IsPresent(G.Board[NX, NY]) then
+            begin
+              G.Board[NX, NY].Flags := G.Board[NX, NY].Flags + [cfLit];
+              G.Board[NX, NY].LastLitTurn := G.TurnNumber;
+            end;
           end;
         end;
       end;
-    end;
+
+    if (Count = 0) or (G.Phase <> gpMaze) or (G.DrawsRemaining = 0) then
+      Break;
+  until not PlaceIlluminationTile(G, Eligible, RequiredDirs);
 end;
 
 procedure ConvertToPit(var Cell: TCell);
@@ -191,7 +215,7 @@ begin
   NY := WrapY(Integer(Y) + DirY[Dir]);
   if not IsPresent(G.Board[NX, NY]) then
   begin
-    if G.Prisoners[Index].Lit and CanGenerateCell(G, NX, NY) then
+    if G.Prisoners[Index].Lit and CanGenerateCell(G, NX, NY, OppositeDir(Dir)) then
       CanMoveDirection := True;
     Exit;
   end;
@@ -216,7 +240,7 @@ begin
   NY := WrapY(Integer(Y) + DirY[Dir]);
 
   if not IsPresent(G.Board[NX, NY]) then
-    if not GenerateCell(G, NX, NY) then
+    if not GenerateCell(G, NX, NY, OppositeDir(Dir)) then
       Exit;
 
   if TileBreaksOnUse(G.Board[X, Y]) then
@@ -231,7 +255,6 @@ begin
   if IsPitCell(G.Board[NX, NY]) then
   begin
     G.Prisoners[Index].Falling := True;
-    G.Prisoners[Index].Lit := False;
     AddLog(G, PrisonerName(Index) + ' leaps into a pit and falls.');
     MovePrisoner := True;
     Exit;
@@ -248,6 +271,8 @@ end;
 function StayPrisoner(var G: TGameState; Index: Byte): Boolean;
 var
   X, Y: Byte;
+  Tile: TDrawTile;
+  GainedNerve: Boolean;
 begin
   StayPrisoner := False;
   if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) then
@@ -261,14 +286,38 @@ begin
     AddLog(G, PrisonerName(Index) + ' spends 1 nerve to hold still in darkness.');
   end;
 
+  GainedNerve := False;
+  if G.Prisoners[Index].Nerve < MaxNerve then
+  begin
+    Inc(G.Prisoners[Index].Nerve);
+    GainedNerve := True;
+  end;
+
   X := G.Prisoners[Index].X;
   Y := G.Prisoners[Index].Y;
   AddLog(G, PrisonerName(Index) + ' stays put.');
+  if GainedNerve then
+    AddLog(G, PrisonerName(Index) + ' gathers 1 nerve.')
+  else
+    AddLog(G, PrisonerName(Index) + ' is already at full nerve.');
+
+  if DrawTopTile(G, Tile, True) then
+  begin
+    if Tile.Feature = ftMonster then
+    begin
+      G.PendingStayMonster := True;
+      G.PendingStayIndex := Index;
+      AddLog(G, 'Staying drew a wax eater. Choose a connected tile to replace.');
+    end
+    else
+      AddLog(G, 'Staying discards one tile from the stack.');
+  end
+  else
+    AddLog(G, 'No tile remains to discard for staying.');
 
   if IsPitCell(G.Board[X, Y]) then
   begin
     G.Prisoners[Index].Falling := True;
-    G.Prisoners[Index].Lit := False;
     AddLog(G, PrisonerName(Index) + ' falls from the pit.');
     StayPrisoner := True;
     Exit;
@@ -278,72 +327,99 @@ begin
   begin
     ConvertToPit(G.Board[X, Y]);
     G.Prisoners[Index].Falling := True;
-    G.Prisoners[Index].Lit := False;
     AddLog(G, PrisonerName(Index) + ' falls as the tile gives way.');
   end;
 
   StayPrisoner := True;
 end;
 
-function FindReEntry(const G: TGameState; Index: Byte; Dir: TDirection; var TX, TY: Byte): Boolean;
+procedure BuildFallingTargets(const G: TGameState; Index: Byte; Dir: TDirection;
+  var EmptyEligible, ExistingEligible: TBoolGrid; var EmptyCount, ExistingCount: Byte);
 var
-  Step, SX, SY: Byte;
+  Step, TX, TY: Byte;
 begin
-  FindReEntry := False;
+  FillChar(EmptyEligible, SizeOf(EmptyEligible), 0);
+  FillChar(ExistingEligible, SizeOf(ExistingEligible), 0);
+  EmptyCount := 0;
+  ExistingCount := 0;
+
+  if not G.Prisoners[Index].Falling then
+    Exit;
+
   case Dir of
     dirNorth:
       begin
-        SX := G.Prisoners[Index].X;
         for Step := 0 to BoardH - 1 do
         begin
-          TX := SX;
+          TX := G.Prisoners[Index].X;
           TY := Step;
-          if IsPassable(G.Board[TX, TY]) and CellOpen(G.Board[TX, TY], dirNorth) then
+          if not IsPresent(G.Board[TX, TY]) then
           begin
-            FindReEntry := True;
-            Exit;
+            EmptyEligible[TX, TY] := True;
+            Inc(EmptyCount);
+          end
+          else if IsPassable(G.Board[TX, TY]) and
+                  ((not (cfOccupied in G.Board[TX, TY].Flags)) or (G.Board[TX, TY].Feature = ftGate)) then
+          begin
+            ExistingEligible[TX, TY] := True;
+            Inc(ExistingCount);
           end;
         end;
       end;
     dirSouth:
       begin
-        SX := G.Prisoners[Index].X;
         for Step := 0 to BoardH - 1 do
         begin
-          TX := SX;
+          TX := G.Prisoners[Index].X;
           TY := BoardH - 1 - Step;
-          if IsPassable(G.Board[TX, TY]) and CellOpen(G.Board[TX, TY], dirSouth) then
+          if not IsPresent(G.Board[TX, TY]) then
           begin
-            FindReEntry := True;
-            Exit;
+            EmptyEligible[TX, TY] := True;
+            Inc(EmptyCount);
+          end
+          else if IsPassable(G.Board[TX, TY]) and
+                  ((not (cfOccupied in G.Board[TX, TY].Flags)) or (G.Board[TX, TY].Feature = ftGate)) then
+          begin
+            ExistingEligible[TX, TY] := True;
+            Inc(ExistingCount);
           end;
         end;
       end;
     dirWest:
       begin
-        SY := G.Prisoners[Index].Y;
         for Step := 0 to BoardW - 1 do
         begin
           TX := Step;
-          TY := SY;
-          if IsPassable(G.Board[TX, TY]) and CellOpen(G.Board[TX, TY], dirWest) then
+          TY := G.Prisoners[Index].Y;
+          if not IsPresent(G.Board[TX, TY]) then
           begin
-            FindReEntry := True;
-            Exit;
+            EmptyEligible[TX, TY] := True;
+            Inc(EmptyCount);
+          end
+          else if IsPassable(G.Board[TX, TY]) and
+                  ((not (cfOccupied in G.Board[TX, TY].Flags)) or (G.Board[TX, TY].Feature = ftGate)) then
+          begin
+            ExistingEligible[TX, TY] := True;
+            Inc(ExistingCount);
           end;
         end;
       end;
     dirEast:
       begin
-        SY := G.Prisoners[Index].Y;
         for Step := 0 to BoardW - 1 do
         begin
           TX := BoardW - 1 - Step;
-          TY := SY;
-          if IsPassable(G.Board[TX, TY]) and CellOpen(G.Board[TX, TY], dirEast) then
+          TY := G.Prisoners[Index].Y;
+          if not IsPresent(G.Board[TX, TY]) then
           begin
-            FindReEntry := True;
-            Exit;
+            EmptyEligible[TX, TY] := True;
+            Inc(EmptyCount);
+          end
+          else if IsPassable(G.Board[TX, TY]) and
+                  ((not (cfOccupied in G.Board[TX, TY].Flags)) or (G.Board[TX, TY].Feature = ftGate)) then
+          begin
+            ExistingEligible[TX, TY] := True;
+            Inc(ExistingCount);
           end;
         end;
       end;
@@ -353,41 +429,130 @@ end;
 function HasAnyReEntry(const G: TGameState; Index: Byte): Boolean;
 var
   Dir: TDirection;
-  TX, TY: Byte;
+  EmptyEligible, ExistingEligible: TBoolGrid;
+  EmptyCount, ExistingCount: Byte;
 begin
   HasAnyReEntry := False;
   for Dir := dirNorth to dirWest do
-    if FindReEntry(G, Index, Dir, TX, TY) then
+  begin
+    BuildFallingTargets(G, Index, Dir, EmptyEligible, ExistingEligible, EmptyCount, ExistingCount);
+    if ((EmptyCount > 0) and (G.DrawsRemaining > 0)) or (ExistingCount > 0) then
     begin
       HasAnyReEntry := True;
       Exit;
     end;
+  end;
 end;
 
 function CanReEnterDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 var
-  TX, TY: Byte;
+  EmptyEligible, ExistingEligible: TBoolGrid;
+  EmptyCount, ExistingCount: Byte;
 begin
-  CanReEnterDirection := FindReEntry(G, Index, Dir, TX, TY);
+  BuildFallingTargets(G, Index, Dir, EmptyEligible, ExistingEligible, EmptyCount, ExistingCount);
+  CanReEnterDirection := ((EmptyCount > 0) and (G.DrawsRemaining > 0)) or (ExistingCount > 0);
+end;
+
+function LandFallingPrisoner(var G: TGameState; Index, X, Y: Byte): Boolean;
+begin
+  LandFallingPrisoner := False;
+  if not G.Prisoners[Index].Falling then
+    Exit;
+
+  if not IsPresent(G.Board[X, Y]) then
+  begin
+    if G.DrawsRemaining = 0 then
+      Exit;
+    if not PlaceFreeTileAt(G, X, Y) then
+      Exit;
+  end
+  else if not IsPassable(G.Board[X, Y]) then
+    Exit;
+
+  G.Prisoners[Index].X := X;
+  G.Prisoners[Index].Y := Y;
+  G.Prisoners[Index].Falling := False;
+  AddLog(G, PrisonerName(Index) + ' lands back in the maze.');
+  if IsPresent(G.Board[X, Y]) and (G.Board[X, Y].Feature = ftMonster) then
+  begin
+    G.PendingLandingMonster := True;
+    G.PendingLandingIndex := Index;
+    AddLog(G, 'A wax eater waits on the landing tile.');
+  end;
+  LandFallingPrisoner := True;
 end;
 
 function ResolveFallingEntry(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 var
-  TX, TY: Byte;
+  EmptyEligible, ExistingEligible: TBoolGrid;
+  EmptyCount, ExistingCount: Byte;
+  X, Y: Byte;
 begin
   ResolveFallingEntry := False;
-  if not G.Prisoners[Index].Falling then
+  BuildFallingTargets(G, Index, Dir, EmptyEligible, ExistingEligible, EmptyCount, ExistingCount);
+  if (EmptyCount > 0) and (G.DrawsRemaining > 0) then
+  begin
+    for Y := 0 to BoardH - 1 do
+      for X := 0 to BoardW - 1 do
+        if EmptyEligible[X, Y] then
+        begin
+          ResolveFallingEntry := LandFallingPrisoner(G, Index, X, Y);
+          Exit;
+        end;
+  end
+  else
+    for Y := 0 to BoardH - 1 do
+      for X := 0 to BoardW - 1 do
+        if ExistingEligible[X, Y] then
+        begin
+          ResolveFallingEntry := LandFallingPrisoner(G, Index, X, Y);
+          Exit;
+        end;
+end;
+
+function CanLandingScrambleDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
+var
+  X, Y, NX, NY: Byte;
+begin
+  CanLandingScrambleDirection := False;
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) then
     Exit;
-  if not FindReEntry(G, Index, Dir, TX, TY) then
+  X := G.Prisoners[Index].X;
+  Y := G.Prisoners[Index].Y;
+  if not IsPresent(G.Board[X, Y]) then
+    Exit;
+  NX := WrapX(Integer(X) + DirX[Dir]);
+  NY := WrapY(Integer(Y) + DirY[Dir]);
+  if not IsPresent(G.Board[NX, NY]) then
+  begin
+    CanLandingScrambleDirection := G.DrawsRemaining > 0;
+    Exit;
+  end;
+  if IsPassable(G.Board[NX, NY]) and
+     ((not (cfOccupied in G.Board[NX, NY].Flags)) or (G.Board[NX, NY].Feature = ftGate)) then
+    CanLandingScrambleDirection := True;
+end;
+
+function ScrambleLandingPrisoner(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
+var
+  X, Y, NX, NY: Byte;
+begin
+  ScrambleLandingPrisoner := False;
+  if not CanLandingScrambleDirection(G, Index, Dir) then
     Exit;
 
-  G.Prisoners[Index].X := TX;
-  G.Prisoners[Index].Y := TY;
-  G.Prisoners[Index].Falling := False;
-  G.Prisoners[Index].Lit := False;
-  AddLog(G, PrisonerName(Index) + ' re-enters from the ' + DirName(Dir) + '.');
-  HandleEntryFeature(G, Index);
-  ResolveFallingEntry := True;
+  X := G.Prisoners[Index].X;
+  Y := G.Prisoners[Index].Y;
+  NX := WrapX(Integer(X) + DirX[Dir]);
+  NY := WrapY(Integer(Y) + DirY[Dir]);
+  if not IsPresent(G.Board[NX, NY]) then
+    if not PlaceFreeTileAt(G, NX, NY) then
+      Exit;
+
+  G.Prisoners[Index].X := NX;
+  G.Prisoners[Index].Y := NY;
+  AddLog(G, PrisonerName(Index) + ' scrambles ' + DirName(Dir) + ' from the monster.');
+  ScrambleLandingPrisoner := True;
 end;
 
 function RayMonsterCount(const G: TGameState; X, Y: Byte; Dir: TDirection): Byte;
@@ -578,6 +743,57 @@ begin
   if IsPresent(G.Board[X, Y]) and (G.Board[X, Y].Kind <> tkPit) and
      (G.Board[X, Y].Feature = ftMonster) then
     WaxContactVictimMask := 1 shl Index;
+end;
+
+procedure BuildStayMonsterTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
+  var Count: Byte);
+var
+  X, Y: Byte;
+  D: TDirection;
+  NX, NY: Byte;
+begin
+  FillChar(Eligible, SizeOf(Eligible), 0);
+  Count := 0;
+
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) then
+    Exit;
+  X := G.Prisoners[Index].X;
+  Y := G.Prisoners[Index].Y;
+  if not IsPassable(G.Board[X, Y]) then
+    Exit;
+
+  for D := dirNorth to dirWest do
+    if CellOpen(G.Board[X, Y], D) then
+    begin
+      NX := WrapX(Integer(X) + DirX[D]);
+      NY := WrapY(Integer(Y) + DirY[D]);
+      if IsPassable(G.Board[NX, NY]) and CellOpen(G.Board[NX, NY], OppositeDir(D)) and
+         not (cfOccupied in G.Board[NX, NY].Flags) and
+         (G.Board[NX, NY].Feature <> ftMonster) then
+      begin
+        Eligible[NX, NY] := True;
+        Inc(Count);
+      end;
+    end;
+end;
+
+procedure PlacePendingStayMonster(var G: TGameState; X, Y: Byte);
+begin
+  if not G.PendingStayMonster then
+    Exit;
+  if not IsPresent(G.Board[X, Y]) then
+  begin
+    G.PendingStayMonster := False;
+    Exit;
+  end;
+
+  if G.Board[X, Y].Feature = ftKey then
+    Inc(G.LostKeys);
+  if G.Board[X, Y].Feature = ftGate then
+    Inc(G.LostGates);
+  G.Board[X, Y].Feature := ftMonster;
+  G.PendingStayMonster := False;
+  AddLog(G, 'A wax eater replaces a connected tile.');
 end;
 
 procedure ApplyMonsterHit(var G: TGameState; Index: Byte; Count: Byte; Brace: Boolean);
