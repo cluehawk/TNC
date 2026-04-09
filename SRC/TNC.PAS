@@ -50,26 +50,41 @@ begin
   CheckWinLoss(G);
 end;
 
-function ResolveLandingMonster(var G: TGameState; Index: Byte): Boolean;
+function HitCountTotal(const HitCounts: TPrisonerHitCounts): Byte;
 var
+  I, Total: Byte;
+begin
+  Total := 0;
+  for I := 0 to PrisonerCount - 1 do
+    Inc(Total, HitCounts[I]);
+  HitCountTotal := Total;
+end;
+
+procedure ResolveMonsterHits(var G: TGameState; const HitCounts: TPrisonerHitCounts);
+var
+  Victim, HitIndex: Byte;
   Brace: Boolean;
+begin
+  for Victim := 0 to PrisonerCount - 1 do
+    for HitIndex := 1 to HitCounts[Victim] do
+    begin
+      DrawGame(G);
+      if G.Prisoners[Victim].Nerve > 0 then
+        Brace := PromptYesNo('Wax eater strikes ' + PrisonerName(Victim) + '. Spend nerve?')
+      else
+        Brace := False;
+      ApplyMonsterHit(G, Victim, 1, Brace);
+    end;
+end;
+
+function ResolveMonsterScramble(var G: TGameState; Index: Byte; const PromptText: string): Boolean;
+var
   Cmd: Char;
   Dir: TDirection;
   MoveText: string;
   HasScramble: Boolean;
 begin
-  ResolveLandingMonster := True;
-  if not G.PendingLandingMonster then
-    Exit;
-
-  G.PendingLandingMonster := False;
-  DrawGame(G);
-  if G.Prisoners[Index].Nerve > 0 then
-    Brace := PromptYesNo('Wax eater strikes on landing. Spend nerve?')
-  else
-    Brace := False;
-  ApplyMonsterHit(G, Index, 1, Brace);
-
+  ResolveMonsterScramble := True;
   HasScramble := CanLandingScrambleDirection(G, Index, dirNorth) or
                  CanLandingScrambleDirection(G, Index, dirWest) or
                  CanLandingScrambleDirection(G, Index, dirSouth) or
@@ -77,8 +92,8 @@ begin
   if not HasScramble then
   begin
     G.Phase := gpLoss;
-    AddLog(G, PrisonerName(Index) + ' cannot scramble away from the landing monster.');
-    ResolveLandingMonster := False;
+    AddLog(G, PrisonerName(Index) + ' cannot scramble away from the wax eater.');
+    ResolveMonsterScramble := False;
     Exit;
   end;
 
@@ -95,12 +110,30 @@ begin
       MoveText := MoveText + ' L';
     WriteAt(3, 23, '                                                                            ');
     WriteAt(3, 24, '                                                                            ');
-    WriteAt(3, 23, 'Landing hit: choose a scramble direction.');
+    WriteAt(3, 23, PromptText);
     WriteAt(3, 24, MoveText);
     GetAction(G, Cmd, Dir);
     if (Cmd = 'M') and ScrambleLandingPrisoner(G, Index, Dir) then
       Break;
   until False;
+end;
+
+function ResolveLandingMonster(var G: TGameState; Index: Byte): Boolean;
+var
+  HitCounts: TPrisonerHitCounts;
+begin
+  ResolveLandingMonster := True;
+  G.PendingLandingMonster := False;
+  BuildLandingMonsterHits(G, Index, HitCounts);
+  if HitCountTotal(HitCounts) > 0 then
+    ResolveMonsterHits(G, HitCounts);
+
+  if PrisonerOnMonster(G, Index) then
+    if not ResolveMonsterScramble(G, Index, 'Landing hit: choose a scramble direction.') then
+    begin
+      ResolveLandingMonster := False;
+      Exit;
+    end;
 
   RefreshAfterLanding(G);
   if G.Phase in [gpWin, gpLoss] then
@@ -126,22 +159,15 @@ begin
   if not LandFallingPrisoner(G, Index, SelX, SelY) then
     Exit;
 
-  if G.PendingLandingMonster then
-  begin
-    if not ResolveLandingMonster(G, Index) then
-      Exit;
-  end
-  else
-    RefreshAfterLanding(G);
+  if not ResolveLandingMonster(G, Index) then
+    Exit;
 
   ResolveFallingLanding := True;
 end;
 
 procedure PostActionUpdate(var G: TGameState; Index, OldX, OldY: Byte; DidMove: Boolean);
 var
-  Victim: Byte;
-  VictimMask: Byte;
-  Brace: Boolean;
+  HitCounts: TPrisonerHitCounts;
   RefreshBoard: Boolean;
 begin
   RefreshBoard := DidMove or G.Prisoners[Index].Falling;
@@ -154,28 +180,28 @@ begin
   end;
 
   if DidMove then
-    VictimMask := WaxEscapeVictimMask(G, Index, OldX, OldY) or WaxContactVictimMask(G, Index)
+    BuildMoveMonsterHits(G, Index, OldX, OldY, HitCounts)
   else
-    VictimMask := 0;
+    FillChar(HitCounts, SizeOf(HitCounts), 0);
 
-  if VictimMask <> 0 then
+  if HitCountTotal(HitCounts) > 0 then
   begin
-    for Victim := 0 to PrisonerCount - 1 do
-      if (VictimMask and (1 shl Victim)) <> 0 then
-      begin
-        DrawGame(G);
-        if G.Prisoners[Victim].Nerve > 0 then
-          Brace := PromptYesNo('Wax eater strikes ' + PrisonerName(Victim) + '. Spend nerve?')
-        else
-          Brace := False;
-        ApplyMonsterHit(G, Victim, 1, Brace);
-      end;
+    ResolveMonsterHits(G, HitCounts);
     if RefreshBoard then
     begin
       ResolveRelights(G);
       RebuildOccupancy(G);
       RecomputeLighting(G);
     end;
+  end;
+
+  if DidMove and PrisonerOnMonster(G, Index) then
+  begin
+    if not ResolveMonsterScramble(G, Index, 'Monster hit: choose a scramble direction.') then
+      Exit;
+    RebuildOccupancy(G);
+    ResolveRelights(G);
+    RecomputeLighting(G);
   end;
 
   RebuildOccupancy(G);

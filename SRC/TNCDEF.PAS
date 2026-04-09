@@ -48,6 +48,7 @@ type
   TMessageStr = string[62];
   TBoolGrid = array[0..BoardW - 1, 0..BoardH - 1] of Boolean;
   TDirGrid = array[0..BoardW - 1, 0..BoardH - 1] of TDirection;
+  TPrisonerHitCounts = array[0..PrisonerCount - 1] of Byte;
 
   TGameState = record
     Board: array[0..BoardW - 1, 0..BoardH - 1] of TCell;
