@@ -7,17 +7,24 @@ const
   BoardH       = 6;
   PrisonerCount = 4;
   MaxLogLines  = 5;
+  BoardLeft    = 2;
+  BoardTop     = 3;
+  BoardCellW   = 5;
+  BoardCellH   = 2;
   StartNerve   = 1;
   MaxNerve     = 2;
   InitialDraws = 76;
   MaxDrawTiles = 80;
+  AttrNormal       = 7;
+  AttrInverse      = 112;
+  AttrBlinkInverse = 240;
 
 type
   TDirection = (dirNorth, dirEast, dirSouth, dirWest);
 
   TTileKind = (tkVoid, tkStart, tkStraight, tkCorner, tkTJunction, tkCross, tkPit);
   TFeature  = (ftNone, ftKey, ftGate, ftCrumbleFresh, ftCrumbleArmed, ftMonster);
-  TCellFlag = (cfPresent, cfPermanent, cfLit, cfOccupied);
+  TCellFlag = (cfPresent, cfPermanent, cfLit, cfOccupied, cfFresh);
   TCellFlags = set of TCellFlag;
   TGamePhase = (gpMaze, gpFinal, gpWin, gpLoss);
 
@@ -96,6 +103,8 @@ function PrisonerName(Index: Byte): string;
 function DirName(D: TDirection): string;
 function PhaseName(P: TGamePhase): string;
 function LogMessage(const G: TGameState; FromOldest: Byte): TMessageStr;
+function BoardCellScreenX(X: Byte): Byte;
+function BoardCellScreenY(Y: Byte): Byte;
 
 procedure ClearCell(var Cell: TCell);
 procedure ClearLog(var G: TGameState);
@@ -247,6 +256,16 @@ begin
   else
     PhaseName := 'LOSS';
   end;
+end;
+
+function BoardCellScreenX(X: Byte): Byte;
+begin
+  BoardCellScreenX := BoardLeft + X * BoardCellW;
+end;
+
+function BoardCellScreenY(Y: Byte): Byte;
+begin
+  BoardCellScreenY := BoardTop + Y * BoardCellH;
 end;
 
 procedure ClearCell(var Cell: TCell);

@@ -39,6 +39,24 @@ begin
   PlacePendingStayMonster(G, SelX, SelY);
 end;
 
+procedure ResolveKeyPass(var G: TGameState; Index: Byte);
+var
+  Eligible: TBoolGrid;
+  Count: Byte;
+  SelX, SelY: Byte;
+begin
+  BuildKeyPassTargets(G, Index, Eligible, Count);
+  if Count = 0 then
+  begin
+    AddLog(G, 'No adjacent connected prisoner can receive that key.');
+    Exit;
+  end;
+
+  PromptSelectBoardCell(G, Eligible, 'Pass the key to which adjacent prisoner?', SelX, SelY);
+  if not PassKeyToCell(G, Index, SelX, SelY) then
+    AddLog(G, 'No key pass was completed.');
+end;
+
 procedure RefreshAfterLanding(var G: TGameState);
 begin
   RebuildOccupancy(G);
@@ -46,6 +64,7 @@ begin
   RecomputeLighting(G);
   CollapseDarkness(G);
   RebuildOccupancy(G);
+  ClearFreshTiles(G);
   CheckPhaseTransitions(G);
   CheckWinLoss(G);
 end;
@@ -165,7 +184,8 @@ begin
   ResolveFallingLanding := True;
 end;
 
-procedure PostActionUpdate(var G: TGameState; Index, OldX, OldY: Byte; DidMove: Boolean);
+procedure PostActionUpdate(var G: TGameState; const BeforeMoveState, AfterMoveState: TGameState;
+  Index, OldX, OldY: Byte; DidMove: Boolean);
 var
   HitCounts: TPrisonerHitCounts;
   RefreshBoard: Boolean;
@@ -180,7 +200,7 @@ begin
   end;
 
   if DidMove then
-    BuildMoveMonsterHits(G, Index, OldX, OldY, HitCounts)
+    BuildMoveMonsterHits(BeforeMoveState, AfterMoveState, Index, OldX, OldY, HitCounts)
   else
     FillChar(HitCounts, SizeOf(HitCounts), 0);
 
@@ -210,6 +230,7 @@ begin
     CollapseDarkness(G);
     RebuildOccupancy(G);
   end;
+  ClearFreshTiles(G);
   CheckPhaseTransitions(G);
   CheckWinLoss(G);
 end;
@@ -221,12 +242,15 @@ var
   Done: Boolean;
   DidMove: Boolean;
   OldX, OldY: Byte;
+  BeforeMoveState, AfterMoveState: TGameState;
 begin
   ResolveOneAction := False;
   Done := False;
   DidMove := False;
   OldX := G.Prisoners[Index].X;
   OldY := G.Prisoners[Index].Y;
+  BeforeMoveState := G;
+  AfterMoveState := G;
   repeat
     DrawGame(G);
     GetAction(G, Cmd, Dir);
@@ -251,6 +275,13 @@ begin
             G.Prisoners[Index].BonusAction := True;
             AddLog(G, PrisonerName(Index) + ' steels up for one extra action.');
           end;
+        end;
+      'P':
+        begin
+          if G.Prisoners[Index].Falling then
+            AddLog(G, 'A falling prisoner cannot pass a key.')
+          else
+            ResolveKeyPass(G, Index);
         end;
       'S':
         begin
@@ -281,6 +312,7 @@ begin
           else if MovePrisoner(G, Index, Dir) then
           begin
             DidMove := True;
+            AfterMoveState := G;
             Done := True;
           end
           else
@@ -291,7 +323,7 @@ begin
 
   if Done then
   begin
-    PostActionUpdate(G, Index, OldX, OldY, DidMove);
+    PostActionUpdate(G, BeforeMoveState, AfterMoveState, Index, OldX, OldY, DidMove);
     ResolveOneAction := True;
   end;
 end;
@@ -387,6 +419,7 @@ begin
   RecomputeLighting(Game);
   CollapseDarkness(Game);
   RebuildOccupancy(Game);
+  ClearFreshTiles(Game);
   CheckWinLoss(Game);
   Game.PromptPlacement := True;
   GameLoop(Game);

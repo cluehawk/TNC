@@ -12,6 +12,10 @@ procedure RecomputeLighting(var G: TGameState);
 function CanMoveDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function MovePrisoner(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function StayPrisoner(var G: TGameState; Index: Byte): Boolean;
+function CanPassKey(const G: TGameState; Index: Byte): Boolean;
+procedure BuildKeyPassTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
+  var Count: Byte);
+function PassKeyToCell(var G: TGameState; Index, X, Y: Byte): Boolean;
 function HasAnyReEntry(const G: TGameState; Index: Byte): Boolean;
 function CanReEnterDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function ResolveFallingEntry(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
@@ -20,7 +24,7 @@ procedure BuildFallingTargets(const G: TGameState; Index: Byte; Dir: TDirection;
 function LandFallingPrisoner(var G: TGameState; Index, X, Y: Byte): Boolean;
 function CanLandingScrambleDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function ScrambleLandingPrisoner(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
-procedure BuildMoveMonsterHits(const G: TGameState; ActiveIndex, OldX, OldY: Byte;
+procedure BuildMoveMonsterHits(const BeforeG, AfterG: TGameState; ActiveIndex, OldX, OldY: Byte;
   var HitCounts: TPrisonerHitCounts);
 procedure BuildLandingMonsterHits(const G: TGameState; Index: Byte; var HitCounts: TPrisonerHitCounts);
 function PrisonerOnMonster(const G: TGameState; Index: Byte): Boolean;
@@ -28,6 +32,7 @@ procedure BuildStayMonsterTargets(const G: TGameState; Index: Byte; var Eligible
   var Count: Byte);
 procedure PlacePendingStayMonster(var G: TGameState; X, Y: Byte);
 procedure ApplyMonsterHit(var G: TGameState; Index: Byte; Count: Byte; Brace: Boolean);
+procedure ClearFreshTiles(var G: TGameState);
 procedure CollapseDarkness(var G: TGameState);
 function RemoveOneFlickerTile(var G: TGameState): Boolean;
 procedure CheckPhaseTransitions(var G: TGameState);
@@ -171,6 +176,13 @@ begin
   IsPitCell := IsPresent(Cell) and (Cell.Kind = tkPit);
 end;
 
+function CanOccupyCell(const G: TGameState; X, Y: Byte): Boolean;
+begin
+  CanOccupyCell := IsPassable(G.Board[X, Y]) and
+                   ((not (cfOccupied in G.Board[X, Y].Flags)) or
+                    (G.Board[X, Y].Feature = ftGate));
+end;
+
 procedure HandleEntryFeature(var G: TGameState; Index: Byte);
 var
   X, Y: Byte;
@@ -216,14 +228,14 @@ begin
   NY := WrapY(Integer(Y) + DirY[Dir]);
   if not IsPresent(G.Board[NX, NY]) then
   begin
-    if G.Prisoners[Index].Lit and CanGenerateCell(G, NX, NY, OppositeDir(Dir)) then
+    if CanGenerateCell(G, NX, NY, OppositeDir(Dir)) then
       CanMoveDirection := True;
     Exit;
   end;
 
   if IsPitCell(G.Board[NX, NY]) then
     CanMoveDirection := True
-  else if IsPassable(G.Board[NX, NY]) and CellOpen(G.Board[NX, NY], OppositeDir(Dir)) then
+  else if CanOccupyCell(G, NX, NY) and CellOpen(G.Board[NX, NY], OppositeDir(Dir)) then
     CanMoveDirection := True;
 end;
 
@@ -261,7 +273,7 @@ begin
     Exit;
   end;
 
-  if not IsPassable(G.Board[NX, NY]) then
+  if not CanOccupyCell(G, NX, NY) then
     Exit;
 
   AddLog(G, PrisonerName(Index) + ' moves ' + DirName(Dir) + '.');
@@ -274,11 +286,13 @@ var
   X, Y: Byte;
   Tile: TDrawTile;
   GainedNerve: Boolean;
+  DarkStay: Boolean;
 begin
   StayPrisoner := False;
   if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) then
     Exit;
 
+  DarkStay := not G.Prisoners[Index].Lit;
   if not G.Prisoners[Index].Lit then
   begin
     if G.Prisoners[Index].Nerve = 0 then
@@ -288,7 +302,7 @@ begin
   end;
 
   GainedNerve := False;
-  if G.Prisoners[Index].Nerve < MaxNerve then
+  if (not DarkStay) and (G.Prisoners[Index].Nerve < MaxNerve) then
   begin
     Inc(G.Prisoners[Index].Nerve);
     GainedNerve := True;
@@ -297,7 +311,9 @@ begin
   X := G.Prisoners[Index].X;
   Y := G.Prisoners[Index].Y;
   AddLog(G, PrisonerName(Index) + ' stays put.');
-  if GainedNerve then
+  if DarkStay then
+    AddLog(G, 'Lights out staying costs 1 nerve and gains none back.')
+  else if GainedNerve then
     AddLog(G, PrisonerName(Index) + ' gathers 1 nerve.')
   else
     AddLog(G, PrisonerName(Index) + ' is already at full nerve.');
@@ -332,6 +348,76 @@ begin
   end;
 
   StayPrisoner := True;
+end;
+
+procedure BuildKeyPassTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
+  var Count: Byte);
+var
+  X, Y, NX, NY, I: Byte;
+  D: TDirection;
+begin
+  FillChar(Eligible, SizeOf(Eligible), 0);
+  Count := 0;
+
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) then
+    Exit;
+  if not G.Prisoners[Index].HasKey then
+    Exit;
+
+  X := G.Prisoners[Index].X;
+  Y := G.Prisoners[Index].Y;
+  if not IsPassable(G.Board[X, Y]) then
+    Exit;
+
+  for D := dirNorth to dirWest do
+    if CellOpen(G.Board[X, Y], D) then
+    begin
+      NX := WrapX(Integer(X) + DirX[D]);
+      NY := WrapY(Integer(Y) + DirY[D]);
+      if IsPassable(G.Board[NX, NY]) and CellOpen(G.Board[NX, NY], OppositeDir(D)) then
+        for I := 0 to PrisonerCount - 1 do
+          if (I <> Index) and G.Prisoners[I].Alive and (not G.Prisoners[I].Falling) and
+             (not G.Prisoners[I].HasKey) and
+             (G.Prisoners[I].X = NX) and (G.Prisoners[I].Y = NY) then
+          begin
+            if not Eligible[NX, NY] then
+            begin
+              Eligible[NX, NY] := True;
+              Inc(Count);
+            end;
+            Break;
+          end;
+    end;
+end;
+
+function CanPassKey(const G: TGameState; Index: Byte): Boolean;
+var
+  Eligible: TBoolGrid;
+  Count: Byte;
+begin
+  BuildKeyPassTargets(G, Index, Eligible, Count);
+  CanPassKey := Count > 0;
+end;
+
+function PassKeyToCell(var G: TGameState; Index, X, Y: Byte): Boolean;
+var
+  I: Byte;
+begin
+  PassKeyToCell := False;
+  if not G.Prisoners[Index].HasKey then
+    Exit;
+
+  for I := 0 to PrisonerCount - 1 do
+    if (I <> Index) and G.Prisoners[I].Alive and (not G.Prisoners[I].Falling) and
+       (not G.Prisoners[I].HasKey) and
+       (G.Prisoners[I].X = X) and (G.Prisoners[I].Y = Y) then
+    begin
+      G.Prisoners[Index].HasKey := False;
+      G.Prisoners[I].HasKey := True;
+      AddLog(G, PrisonerName(Index) + ' passes a key to ' + PrisonerName(I) + '.');
+      PassKeyToCell := True;
+      Exit;
+    end;
 end;
 
 procedure BuildFallingTargets(const G: TGameState; Index: Byte; Dir: TDirection;
@@ -467,7 +553,7 @@ begin
     if not PlaceFreeTileAt(G, X, Y) then
       Exit;
   end
-  else if not IsPassable(G.Board[X, Y]) then
+  else if not CanOccupyCell(G, X, Y) then
     Exit;
 
   G.Prisoners[Index].X := X;
@@ -698,14 +784,35 @@ begin
   end;
 end;
 
-procedure BuildMoveMonsterHits(const G: TGameState; ActiveIndex, OldX, OldY: Byte;
+function MonsterTriggeredByMove(const BeforeG, AfterG: TGameState; MX, MY, OldX, OldY, NewX, NewY: Byte): Boolean;
+var
+  OldSeen, NewSeen: Boolean;
+  OldDir, NewDir: TDirection;
+begin
+  MonsterTriggeredByMove := False;
+
+  if (MX = NewX) and (MY = NewY) then
+  begin
+    MonsterTriggeredByMove := True;
+    Exit;
+  end;
+
+  OldSeen := MonsterSeesCell(BeforeG, MX, MY, OldX, OldY, OldDir);
+  NewSeen := MonsterSeesCell(AfterG, MX, MY, NewX, NewY, NewDir);
+  if OldSeen or NewSeen then
+  begin
+    MonsterTriggeredByMove := True;
+    Exit;
+  end;
+end;
+
+procedure BuildMoveMonsterHits(const BeforeG, AfterG: TGameState; ActiveIndex, OldX, OldY: Byte;
   var HitCounts: TPrisonerHitCounts);
 var
   X, Y: Byte;
   QueueX, QueueY: TMonsterQueue;
   Scheduled: TMonsterGrid;
   Tail: Byte;
-  HitDir: TDirection;
 begin
   FillChar(HitCounts, SizeOf(HitCounts), 0);
   FillChar(Scheduled, SizeOf(Scheduled), 0);
@@ -713,13 +820,14 @@ begin
 
   for X := 0 to BoardW - 1 do
     for Y := 0 to BoardH - 1 do
-      if IsPresent(G.Board[X, Y]) and (G.Board[X, Y].Feature = ftMonster) then
-        if ((G.Prisoners[ActiveIndex].X = X) and (G.Prisoners[ActiveIndex].Y = Y)) or
-           MonsterSeesCell(G, X, Y, OldX, OldY, HitDir) or
-           MonsterSeesCell(G, X, Y, G.Prisoners[ActiveIndex].X, G.Prisoners[ActiveIndex].Y, HitDir) then
-          QueueMonster(G, X, Y, Scheduled, QueueX, QueueY, Tail);
+      if IsPresent(AfterG.Board[X, Y]) and (AfterG.Board[X, Y].Feature = ftMonster) then
+        if ((AfterG.Prisoners[ActiveIndex].X = X) and (AfterG.Prisoners[ActiveIndex].Y = Y)) or
+           (((not (cfFresh in AfterG.Board[X, Y].Flags)) and
+             MonsterTriggeredByMove(BeforeG, AfterG, X, Y, OldX, OldY,
+               AfterG.Prisoners[ActiveIndex].X, AfterG.Prisoners[ActiveIndex].Y))) then
+          QueueMonster(AfterG, X, Y, Scheduled, QueueX, QueueY, Tail);
 
-  ExpandTriggeredMonsters(G, Scheduled, QueueX, QueueY, Tail, HitCounts);
+  ExpandTriggeredMonsters(AfterG, Scheduled, QueueX, QueueY, Tail, HitCounts);
 end;
 
 procedure BuildLandingMonsterHits(const G: TGameState; Index: Byte; var HitCounts: TPrisonerHitCounts);
@@ -739,7 +847,9 @@ begin
   for MX := 0 to BoardW - 1 do
     for MY := 0 to BoardH - 1 do
       if IsPresent(G.Board[MX, MY]) and (G.Board[MX, MY].Feature = ftMonster) then
-        if ((MX = X) and (MY = Y)) or MonsterSeesCell(G, MX, MY, X, Y, HitDir) then
+        if ((MX = X) and (MY = Y)) or
+           (((not (cfFresh in G.Board[MX, MY].Flags)) and
+             MonsterSeesCell(G, MX, MY, X, Y, HitDir))) then
           QueueMonster(G, MX, MY, Scheduled, QueueX, QueueY, Tail);
 
   ExpandTriggeredMonsters(G, Scheduled, QueueX, QueueY, Tail, HitCounts);
@@ -792,6 +902,7 @@ begin
   if G.Board[X, Y].Feature = ftGate then
     Inc(G.LostGates);
   G.Board[X, Y].Feature := ftMonster;
+  G.Board[X, Y].Flags := G.Board[X, Y].Flags + [cfFresh];
   G.PendingStayMonster := False;
   AddLog(G, 'A wax eater replaces a connected tile.');
 end;
@@ -815,6 +926,16 @@ begin
   G.Prisoners[Index].Lit := False;
   DiscardDrawTiles(G, Loss);
   AddLog(G, PrisonerName(Index) + ' is struck by wax eaters.');
+end;
+
+procedure ClearFreshTiles(var G: TGameState);
+var
+  X, Y: Byte;
+begin
+  for X := 0 to BoardW - 1 do
+    for Y := 0 to BoardH - 1 do
+      if IsPresent(G.Board[X, Y]) then
+        G.Board[X, Y].Flags := G.Board[X, Y].Flags - [cfFresh];
 end;
 
 procedure CollapseDarkness(var G: TGameState);

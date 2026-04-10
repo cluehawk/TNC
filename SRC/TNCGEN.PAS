@@ -18,13 +18,31 @@ function DrawTopTile(var G: TGameState; var Tile: TDrawTile; Lost: Boolean): Boo
 
 implementation
 
+procedure SetPreviewHighlight;
+begin
+  TextAttr := AttrBlinkInverse;
+end;
+
+procedure SetNormalText;
+begin
+  TextAttr := AttrNormal;
+end;
+
+function PreviewScreenY(Y: Byte): Byte;
+begin
+  if BoardCellScreenY(Y) > 1 then
+    PreviewScreenY := BoardCellScreenY(Y) - 1
+  else
+    PreviewScreenY := BoardCellScreenY(Y);
+end;
+
 procedure SetStartCell(var G: TGameState; X, Y: Byte);
 begin
   ClearCell(G.Board[X, Y]);
   G.Board[X, Y].Kind := tkStart;
   G.Board[X, Y].Rot := 0;
   G.Board[X, Y].Feature := ftNone;
-  G.Board[X, Y].Flags := [cfPresent];
+  G.Board[X, Y].Flags := [cfPresent, cfFresh];
 end;
 
 procedure ClearDrawTile(var T: TDrawTile);
@@ -301,17 +319,15 @@ begin
   S := '    ';
   S[2] := TileGlyph(Tile.Kind, Rot);
   S[3] := PreviewFeatureGlyph(Tile.Kind, Tile.Feature);
-  GotoXY(2 + X * 5, 3 + Y * 2);
-  TextBackground(White);
-  TextColor(Black);
+  GotoXY(BoardCellScreenX(X), PreviewScreenY(Y));
+  SetPreviewHighlight;
   Write(S);
-  TextBackground(Black);
-  TextColor(LightGray);
+  SetNormalText;
 end;
 
 procedure ClearPreviewTile(X, Y: Byte);
 begin
-  GotoXY(2 + X * 5, 3 + Y * 2);
+  GotoXY(BoardCellScreenX(X), PreviewScreenY(Y));
   Write('    ');
 end;
 
@@ -513,7 +529,7 @@ begin
     G.Board[SelX, SelY].Kind := Tile.Kind;
     G.Board[SelX, SelY].Rot := Rot;
     G.Board[SelX, SelY].Feature := Tile.Feature;
-    G.Board[SelX, SelY].Flags := [cfPresent];
+    G.Board[SelX, SelY].Flags := [cfPresent, cfFresh];
     G.Board[SelX, SelY].LastLitTurn := 0;
     PlaceIlluminationTile := True;
     Exit;
@@ -538,7 +554,7 @@ begin
   G.Board[X, Y].Kind := Tile.Kind;
   G.Board[X, Y].Rot := Rot;
   G.Board[X, Y].Feature := Tile.Feature;
-  G.Board[X, Y].Flags := [cfPresent];
+  G.Board[X, Y].Flags := [cfPresent, cfFresh];
   G.Board[X, Y].LastLitTurn := 0;
   PlaceFreeTileAt := True;
 end;
@@ -602,7 +618,7 @@ begin
       G.Board[X, Y].Kind := Tile.Kind;
       G.Board[X, Y].Rot := Rot;
       G.Board[X, Y].Feature := Tile.Feature;
-      G.Board[X, Y].Flags := [cfPresent];
+      G.Board[X, Y].Flags := [cfPresent, cfFresh];
       G.Board[X, Y].LastLitTurn := 0;
 
       GenerateCell := True;

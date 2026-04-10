@@ -37,6 +37,19 @@ begin
   Write(S);
 end;
 
+procedure SetHighlight(BlinkOn: Boolean);
+begin
+  if BlinkOn then
+    TextAttr := AttrBlinkInverse
+  else
+    TextAttr := AttrInverse;
+end;
+
+procedure SetNormalText;
+begin
+  TextAttr := AttrNormal;
+end;
+
 procedure DrawBox(X1, Y1, X2, Y2: Byte);
 var
   X, Y: Byte;
@@ -180,18 +193,16 @@ begin
 
     if Y < BoardH then
     begin
-      Row := 3 + Y * 2;
+      Row := BoardCellScreenY(Y);
       GotoXY(1, Row);
       for X := 0 to BoardW - 1 do
       begin
         Write(BoxChar(179));
         if ActivePrisonerAtCell(G, X, Y) then
         begin
-          TextBackground(White);
-          TextColor(Black);
+          SetHighlight(False);
           Write(TileLine(G, X, Y, 0));
-          TextBackground(Black);
-          TextColor(LightGray);
+          SetNormalText;
         end
         else
           Write(TileLine(G, X, Y, 0));
@@ -270,6 +281,7 @@ var
   I: Byte;
   StartLine: Byte;
   MoveText: string;
+  HelpText: string;
 begin
   DrawBox(1, 16, 80, 25);
   WriteAt(3, 16, ' Log ');
@@ -285,7 +297,7 @@ begin
     for I := StartLine to G.LogCount - 1 do
       WriteAt(3, 17 + (I - StartLine), LogMessage(G, I));
 
-  WriteAt(3, 20, 'Legend: inverse turn 1-4 prisoners + stack  S start  K key');
+  WriteAt(3, 20, 'Legend: inverse turn 1-4 prisoners + gate stack  S start  K key');
   WriteAt(3, 21, '        W wax eater  * crumble  O pit  blank = darkness');
   WriteAt(3, 22, 'Turn now: >> ' + PrisonerName(G.ActiveIndex) + ' <<');
 
@@ -318,9 +330,24 @@ begin
       MoveText := 'Moves: none';
   end;
 
-  WriteAt(3, 23, MoveText + '   S stay  N extra action  TAB view  Q quit');
+  HelpText := '   N extra action  TAB view  Q quit';
+  if not G.Prisoners[G.ActiveIndex].Falling then
+  begin
+    if CanPassKey(G, G.ActiveIndex) then
+      HelpText := '   P pass key' + HelpText;
+    if G.Prisoners[G.ActiveIndex].Lit then
+      HelpText := '   S stay' + HelpText
+    else if G.Prisoners[G.ActiveIndex].Nerve > 0 then
+      HelpText := '   S stay(1N)' + HelpText
+    else
+      HelpText := HelpText;
+  end;
+
+  WriteAt(3, 23, MoveText + HelpText);
   if G.Prisoners[G.ActiveIndex].Falling then
     WriteAt(3, 24, 'Falling turn: choose one of the shown re-entry directions.                ')
+  else if not G.Prisoners[G.ActiveIndex].Lit then
+    WriteAt(3, 24, 'Lights out: must move. Only the destination is revealed this turn.        ')
   else
     WriteAt(3, 24, 'Movement keys: I up, J left, K down, L right.                             ');
 end;
@@ -345,10 +372,11 @@ begin
   WriteAt(12, 8, 'Four prisoners wake in separate pools of candlelight.');
   WriteAt(12, 9, 'Keep the maze lit, gather 4 keys, then meet on one gate.');
   WriteAt(12, 10, 'Wax eaters hunt straight passages. Darkness devours the rest.');
-  WriteAt(12, 12, 'Symbols: @ active 1-4 prisoners  S start  K key  G gate');
+  WriteAt(12, 12, 'Symbols: inverse active 1-4 prisoners  S start  K key  G gate');
   WriteAt(12, 13, '         W wax eater  * crumble  O pit  blank = darkness');
-  WriteAt(12, 15, 'I up  J left  K down  L right  S stay  N extra action');
-  WriteAt(12, 16, 'Q quits to DOS');
+  WriteAt(12, 15, 'I up  J left  K down  L right  P pass key  S stay');
+  WriteAt(12, 16, 'Lights out: must move, or spend 1 nerve to stay');
+  WriteAt(12, 17, 'Q quits to DOS');
   WriteAt(12, 19, 'Press any key to begin.');
   ReadKey;
 end;
@@ -384,6 +412,7 @@ begin
           'Q': begin Cmd := 'Q'; Exit; end;
           'S': begin Cmd := 'S'; Exit; end;
           'N': begin Cmd := 'N'; Exit; end;
+          'P': begin Cmd := 'P'; Exit; end;
           'I': begin Cmd := 'M'; Dir := dirNorth; Exit; end;
           'L': begin Cmd := 'M'; Dir := dirEast; Exit; end;
           'K': begin Cmd := 'M'; Dir := dirSouth; Exit; end;
@@ -429,14 +458,10 @@ begin
 
   repeat
     DrawGame(G);
-    HighVideo;
-    TextBackground(White);
-    TextColor(Black);
-    GotoXY(2 + SelX * 5, 3 + SelY * 2);
+    SetHighlight(True);
+    GotoXY(BoardCellScreenX(SelX), BoardCellScreenY(SelY));
     Write(TileLine(G, SelX, SelY, 0));
-    TextBackground(Black);
-    TextColor(LightGray);
-    NormVideo;
+    SetNormalText;
     WriteAt(3, 23, '                                                                            ');
     WriteAt(3, 24, '                                                                            ');
     WriteAt(3, 23, Prompt);
