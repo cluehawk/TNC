@@ -10,6 +10,7 @@ procedure RebuildOccupancy(var G: TGameState);
 procedure ResolveRelights(var G: TGameState);
 procedure RecomputeLighting(var G: TGameState);
 function CanMoveDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
+function MoveRequiresCharge(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function MovePrisoner(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function StayPrisoner(var G: TGameState; Index: Byte): Boolean;
 function CanPassKey(const G: TGameState; Index: Byte): Boolean;
@@ -24,9 +25,10 @@ procedure BuildFallingTargets(const G: TGameState; Index: Byte; Dir: TDirection;
 function LandFallingPrisoner(var G: TGameState; Index, X, Y: Byte): Boolean;
 function CanLandingScrambleDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function ScrambleLandingPrisoner(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
-procedure BuildMoveMonsterHits(const BeforeG, AfterG: TGameState; ActiveIndex, OldX, OldY: Byte;
-  var HitCounts: TPrisonerHitCounts);
-procedure BuildLandingMonsterHits(const G: TGameState; Index: Byte; var HitCounts: TPrisonerHitCounts);
+procedure BuildMoveTriggeredMonsters(const BeforeG, AfterG: TGameState; ActiveIndex, OldX, OldY: Byte;
+  var Scheduled: TBoolGrid);
+procedure BuildLandingTriggeredMonsters(const G: TGameState; Index: Byte; var Scheduled: TBoolGrid);
+function MonsterVictimMaskAndChains(const G: TGameState; MX, MY: Byte; var Scheduled: TBoolGrid): Byte;
 function PrisonerOnMonster(const G: TGameState; Index: Byte): Boolean;
 procedure BuildStayMonsterTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
   var Count: Byte);
@@ -38,6 +40,11 @@ function RemoveOneFlickerTile(var G: TGameState): Boolean;
 procedure CheckPhaseTransitions(var G: TGameState);
 procedure CheckWinLoss(var G: TGameState);
 function PrisonerCanAct(const G: TGameState; Index: Byte): Boolean;
+function RemainingKeys(const G: TGameState): Byte;
+function RemainingGates(const G: TGameState): Byte;
+function PrisonerOnBreakableTile(const G: TGameState; Index: Byte): Boolean;
+function PrisonerOnPit(const G: TGameState; Index: Byte): Boolean;
+function PrisonerHasAnyMove(const G: TGameState; Index: Byte): Boolean;
 
 implementation
 
@@ -50,7 +57,7 @@ begin
       G.Board[X, Y].Flags := G.Board[X, Y].Flags - [cfOccupied];
 
   for I := 0 to PrisonerCount - 1 do
-    if G.Prisoners[I].Alive and (not G.Prisoners[I].Falling) then
+    if G.Prisoners[I].Alive and G.Prisoners[I].Started and (not G.Prisoners[I].Falling) then
       if IsPresent(G.Board[G.Prisoners[I].X, G.Prisoners[I].Y]) then
         G.Board[G.Prisoners[I].X, G.Prisoners[I].Y].Flags :=
           G.Board[G.Prisoners[I].X, G.Prisoners[I].Y].Flags + [cfOccupied];
@@ -68,7 +75,7 @@ begin
     if I <> Index then
     begin
       Q := G.Prisoners[I];
-      if Q.Alive and Q.Lit and (not Q.Falling) then
+      if Q.Alive and Q.Started and Q.Lit and (not Q.Falling) then
       begin
         if (P.X = Q.X) and (P.Y = Q.Y) then
         begin
@@ -95,7 +102,8 @@ var
   I: Byte;
 begin
   for I := 0 to PrisonerCount - 1 do
-    if G.Prisoners[I].Alive and (not G.Prisoners[I].Falling) and (not G.Prisoners[I].Lit) then
+    if G.Prisoners[I].Alive and G.Prisoners[I].Started and
+       (not G.Prisoners[I].Falling) and (not G.Prisoners[I].Lit) then
       if AdjacentLitAlly(G, I) then
       begin
         G.Prisoners[I].Lit := True;
@@ -121,7 +129,8 @@ begin
     Count := 0;
 
     for I := 0 to PrisonerCount - 1 do
-      if G.Prisoners[I].Alive and G.Prisoners[I].Lit and (not G.Prisoners[I].Falling) then
+      if G.Prisoners[I].Alive and G.Prisoners[I].Started and
+         G.Prisoners[I].Lit and (not G.Prisoners[I].Falling) then
       begin
         X := G.Prisoners[I].X;
         Y := G.Prisoners[I].Y;
@@ -214,7 +223,8 @@ var
   X, Y, NX, NY: Byte;
 begin
   CanMoveDirection := False;
-  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) then
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) or
+     (not G.Prisoners[Index].Started) then
     Exit;
 
   X := G.Prisoners[Index].X;
@@ -236,7 +246,44 @@ begin
   if IsPitCell(G.Board[NX, NY]) then
     CanMoveDirection := True
   else if CanOccupyCell(G, NX, NY) and CellOpen(G.Board[NX, NY], OppositeDir(Dir)) then
-    CanMoveDirection := True;
+  begin
+    if G.Board[NX, NY].Feature = ftMonster then
+    begin
+      if G.Prisoners[Index].Lit then
+        CanMoveDirection := G.Prisoners[Index].Nerve > 0
+      else
+        CanMoveDirection := True;
+    end
+    else
+      CanMoveDirection := True;
+  end;
+end;
+
+function MoveRequiresCharge(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
+var
+  X, Y, NX, NY: Byte;
+begin
+  MoveRequiresCharge := False;
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) or
+     (not G.Prisoners[Index].Started) or (not G.Prisoners[Index].Lit) then
+    Exit;
+
+  X := G.Prisoners[Index].X;
+  Y := G.Prisoners[Index].Y;
+  if not IsPassable(G.Board[X, Y]) then
+    Exit;
+  if not CellOpen(G.Board[X, Y], Dir) then
+    Exit;
+
+  NX := WrapX(Integer(X) + DirX[Dir]);
+  NY := WrapY(Integer(Y) + DirY[Dir]);
+  if not IsPresent(G.Board[NX, NY]) then
+    Exit;
+  if not CellOpen(G.Board[NX, NY], OppositeDir(Dir)) then
+    Exit;
+  if not CanOccupyCell(G, NX, NY) then
+    Exit;
+  MoveRequiresCharge := G.Board[NX, NY].Feature = ftMonster;
 end;
 
 function MovePrisoner(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
@@ -289,7 +336,8 @@ var
   DarkStay: Boolean;
 begin
   StayPrisoner := False;
-  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) then
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) or
+     (not G.Prisoners[Index].Started) then
     Exit;
 
   DarkStay := not G.Prisoners[Index].Lit;
@@ -359,7 +407,8 @@ begin
   FillChar(Eligible, SizeOf(Eligible), 0);
   Count := 0;
 
-  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) then
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) or
+     (not G.Prisoners[Index].Started) then
     Exit;
   if not G.Prisoners[Index].HasKey then
     Exit;
@@ -376,7 +425,8 @@ begin
       NY := WrapY(Integer(Y) + DirY[D]);
       if IsPassable(G.Board[NX, NY]) and CellOpen(G.Board[NX, NY], OppositeDir(D)) then
         for I := 0 to PrisonerCount - 1 do
-          if (I <> Index) and G.Prisoners[I].Alive and (not G.Prisoners[I].Falling) and
+          if (I <> Index) and G.Prisoners[I].Alive and G.Prisoners[I].Started and
+             (not G.Prisoners[I].Falling) and
              (not G.Prisoners[I].HasKey) and
              (G.Prisoners[I].X = NX) and (G.Prisoners[I].Y = NY) then
           begin
@@ -408,7 +458,8 @@ begin
     Exit;
 
   for I := 0 to PrisonerCount - 1 do
-    if (I <> Index) and G.Prisoners[I].Alive and (not G.Prisoners[I].Falling) and
+    if (I <> Index) and G.Prisoners[I].Alive and G.Prisoners[I].Started and
+       (not G.Prisoners[I].Falling) and
        (not G.Prisoners[I].HasKey) and
        (G.Prisoners[I].X = X) and (G.Prisoners[I].Y = Y) then
     begin
@@ -602,7 +653,8 @@ var
   X, Y, NX, NY: Byte;
 begin
   CanLandingScrambleDirection := False;
-  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) then
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) or
+     (not G.Prisoners[Index].Started) then
     Exit;
   X := G.Prisoners[Index].X;
   Y := G.Prisoners[Index].Y;
@@ -633,7 +685,7 @@ begin
   NX := WrapX(Integer(X) + DirX[Dir]);
   NY := WrapY(Integer(Y) + DirY[Dir]);
   if not IsPresent(G.Board[NX, NY]) then
-    if not PlaceFreeTileAt(G, NX, NY) then
+    if not PlaceFreeTileAtAuto(G, NX, NY) then
       Exit;
 
   G.Prisoners[Index].X := NX;
@@ -691,7 +743,8 @@ var
   X, Y: Byte;
 begin
   PrisonerOnMonster := False;
-  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) then
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) or
+     (not G.Prisoners[Index].Started) then
     Exit;
   X := G.Prisoners[Index].X;
   Y := G.Prisoners[Index].Y;
@@ -717,29 +770,31 @@ begin
 end;
 
 procedure MarkPrisonersAtCell(const G: TGameState; X, Y: Byte; var Seen: TPrisonerMarks;
-  var HitCounts: TPrisonerHitCounts);
+  var VictimMask: Byte);
 var
   I: Byte;
 begin
   for I := 0 to PrisonerCount - 1 do
-    if G.Prisoners[I].Alive and (not G.Prisoners[I].Falling) and
+    if G.Prisoners[I].Alive and G.Prisoners[I].Started and
+       (not G.Prisoners[I].Falling) and
        (G.Prisoners[I].X = X) and (G.Prisoners[I].Y = Y) and
        (not Seen[I]) then
     begin
       Seen[I] := True;
-      Inc(HitCounts[I]);
+      VictimMask := VictimMask or (1 shl I);
     end;
 end;
 
-procedure TraceMonsterAttack(const G: TGameState; MX, MY: Byte; var Scheduled: TMonsterGrid;
-  var QueueX, QueueY: TMonsterQueue; var Tail: Byte; var HitCounts: TPrisonerHitCounts);
+function MonsterVictimMaskAndChains(const G: TGameState; MX, MY: Byte; var Scheduled: TBoolGrid): Byte;
 var
   D: TDirection;
   CX, CY, NX, NY, Limit, Step: Byte;
   Seen: TPrisonerMarks;
+  Mask: Byte;
 begin
   FillChar(Seen, SizeOf(Seen), 0);
-  MarkPrisonersAtCell(G, MX, MY, Seen, HitCounts);
+  Mask := 0;
+  MarkPrisonersAtCell(G, MX, MY, Seen, Mask);
 
   for D := dirNorth to dirWest do
   begin
@@ -764,24 +819,12 @@ begin
 
       CX := NX;
       CY := NY;
-      MarkPrisonersAtCell(G, CX, CY, Seen, HitCounts);
+      MarkPrisonersAtCell(G, CX, CY, Seen, Mask);
       if G.Board[CX, CY].Feature = ftMonster then
-        QueueMonster(G, CX, CY, Scheduled, QueueX, QueueY, Tail);
+        Scheduled[CX, CY] := True;
     end;
   end;
-end;
-
-procedure ExpandTriggeredMonsters(const G: TGameState; var Scheduled: TMonsterGrid;
-  var QueueX, QueueY: TMonsterQueue; Tail: Byte; var HitCounts: TPrisonerHitCounts);
-var
-  Head: Byte;
-begin
-  Head := 0;
-  while Head < Tail do
-  begin
-    TraceMonsterAttack(G, QueueX[Head], QueueY[Head], Scheduled, QueueX, QueueY, Tail, HitCounts);
-    Inc(Head);
-  end;
+  MonsterVictimMaskAndChains := Mask;
 end;
 
 function MonsterTriggeredByMove(const BeforeG, AfterG: TGameState; MX, MY, OldX, OldY, NewX, NewY: Byte): Boolean;
@@ -806,17 +849,12 @@ begin
   end;
 end;
 
-procedure BuildMoveMonsterHits(const BeforeG, AfterG: TGameState; ActiveIndex, OldX, OldY: Byte;
-  var HitCounts: TPrisonerHitCounts);
+procedure BuildMoveTriggeredMonsters(const BeforeG, AfterG: TGameState; ActiveIndex, OldX, OldY: Byte;
+  var Scheduled: TBoolGrid);
 var
   X, Y: Byte;
-  QueueX, QueueY: TMonsterQueue;
-  Scheduled: TMonsterGrid;
-  Tail: Byte;
 begin
-  FillChar(HitCounts, SizeOf(HitCounts), 0);
   FillChar(Scheduled, SizeOf(Scheduled), 0);
-  Tail := 0;
 
   for X := 0 to BoardW - 1 do
     for Y := 0 to BoardH - 1 do
@@ -825,22 +863,15 @@ begin
            (((not (cfFresh in AfterG.Board[X, Y].Flags)) and
              MonsterTriggeredByMove(BeforeG, AfterG, X, Y, OldX, OldY,
                AfterG.Prisoners[ActiveIndex].X, AfterG.Prisoners[ActiveIndex].Y))) then
-          QueueMonster(AfterG, X, Y, Scheduled, QueueX, QueueY, Tail);
-
-  ExpandTriggeredMonsters(AfterG, Scheduled, QueueX, QueueY, Tail, HitCounts);
+          Scheduled[X, Y] := True;
 end;
 
-procedure BuildLandingMonsterHits(const G: TGameState; Index: Byte; var HitCounts: TPrisonerHitCounts);
+procedure BuildLandingTriggeredMonsters(const G: TGameState; Index: Byte; var Scheduled: TBoolGrid);
 var
   X, Y, MX, MY: Byte;
-  QueueX, QueueY: TMonsterQueue;
-  Scheduled: TMonsterGrid;
-  Tail: Byte;
   HitDir: TDirection;
 begin
-  FillChar(HitCounts, SizeOf(HitCounts), 0);
   FillChar(Scheduled, SizeOf(Scheduled), 0);
-  Tail := 0;
   X := G.Prisoners[Index].X;
   Y := G.Prisoners[Index].Y;
 
@@ -850,9 +881,7 @@ begin
         if ((MX = X) and (MY = Y)) or
            (((not (cfFresh in G.Board[MX, MY].Flags)) and
              MonsterSeesCell(G, MX, MY, X, Y, HitDir))) then
-          QueueMonster(G, MX, MY, Scheduled, QueueX, QueueY, Tail);
-
-  ExpandTriggeredMonsters(G, Scheduled, QueueX, QueueY, Tail, HitCounts);
+          Scheduled[MX, MY] := True;
 end;
 
 procedure BuildStayMonsterTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
@@ -865,7 +894,8 @@ begin
   FillChar(Eligible, SizeOf(Eligible), 0);
   Count := 0;
 
-  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) then
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) or
+     (not G.Prisoners[Index].Started) then
     Exit;
   X := G.Prisoners[Index].X;
   Y := G.Prisoners[Index].Y;
@@ -1019,13 +1049,74 @@ begin
   CountBoardFeature := Count;
 end;
 
+function RemainingKeys(const G: TGameState): Byte;
+begin
+  RemainingKeys := CountHeldKeys(G) + CountBoardFeature(G, ftKey) + G.FeatureKeys;
+end;
+
+function RemainingGates(const G: TGameState): Byte;
+var
+  Count: Byte;
+begin
+  Count := CountBoardFeature(G, ftGate);
+  if G.Phase = gpMaze then
+    Inc(Count, G.FeatureGates);
+  RemainingGates := Count;
+end;
+
+function PrisonerOnBreakableTile(const G: TGameState; Index: Byte): Boolean;
+var
+  X, Y: Byte;
+begin
+  PrisonerOnBreakableTile := False;
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) or
+     (not G.Prisoners[Index].Started) then
+    Exit;
+  X := G.Prisoners[Index].X;
+  Y := G.Prisoners[Index].Y;
+  if not IsPresent(G.Board[X, Y]) then
+    Exit;
+  PrisonerOnBreakableTile := TileBreaksOnUse(G.Board[X, Y]);
+end;
+
+function PrisonerOnPit(const G: TGameState; Index: Byte): Boolean;
+var
+  X, Y: Byte;
+begin
+  PrisonerOnPit := False;
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) or
+     (not G.Prisoners[Index].Started) then
+    Exit;
+  X := G.Prisoners[Index].X;
+  Y := G.Prisoners[Index].Y;
+  if not IsPresent(G.Board[X, Y]) then
+    Exit;
+  PrisonerOnPit := IsPitCell(G.Board[X, Y]);
+end;
+
+function PrisonerHasAnyMove(const G: TGameState; Index: Byte): Boolean;
+var
+  Dir: TDirection;
+begin
+  PrisonerHasAnyMove := False;
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) or
+     (not G.Prisoners[Index].Started) then
+    Exit;
+  for Dir := dirNorth to dirWest do
+    if CanMoveDirection(G, Index, Dir) then
+    begin
+      PrisonerHasAnyMove := True;
+      Exit;
+    end;
+end;
+
 function AllOnSameGate(const G: TGameState): Boolean;
 var
   I: Byte;
   GX, GY: Byte;
 begin
   AllOnSameGate := False;
-  if G.Prisoners[0].Falling then
+  if (not G.Prisoners[0].Started) or G.Prisoners[0].Falling then
     Exit;
   GX := G.Prisoners[0].X;
   GY := G.Prisoners[0].Y;
@@ -1035,7 +1126,7 @@ begin
     Exit;
 
   for I := 1 to PrisonerCount - 1 do
-    if G.Prisoners[I].Falling or
+    if (not G.Prisoners[I].Started) or G.Prisoners[I].Falling or
        (G.Prisoners[I].X <> GX) or
        (G.Prisoners[I].Y <> GY) then
       Exit;
@@ -1050,6 +1141,11 @@ begin
   PrisonerCanAct := False;
   if not G.Prisoners[Index].Alive then
     Exit;
+  if not G.Prisoners[Index].Started then
+  begin
+    PrisonerCanAct := True;
+    Exit;
+  end;
 
   if G.Prisoners[Index].Falling then
   begin
@@ -1084,7 +1180,7 @@ begin
     Exit;
   end;
 
-  TotalKeyCapacity := CountHeldKeys(G) + CountBoardFeature(G, ftKey) + G.FeatureKeys;
+  TotalKeyCapacity := RemainingKeys(G);
   if TotalKeyCapacity < 4 then
   begin
     G.Phase := gpLoss;
@@ -1092,9 +1188,7 @@ begin
     Exit;
   end;
 
-  GateCapacity := CountBoardFeature(G, ftGate);
-  if G.Phase = gpMaze then
-    Inc(GateCapacity, G.FeatureGates);
+  GateCapacity := RemainingGates(G);
   if GateCapacity = 0 then
   begin
     G.Phase := gpLoss;

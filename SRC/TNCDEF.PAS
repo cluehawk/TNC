@@ -44,6 +44,7 @@ type
   TPrisoner = record
     X: Byte;
     Y: Byte;
+    Started: Boolean;
     Lit: Boolean;
     HasKey: Boolean;
     Falling: Boolean;

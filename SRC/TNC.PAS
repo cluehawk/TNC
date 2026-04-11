@@ -18,6 +18,56 @@ begin
   Inc(G.TurnNumber);
 end;
 
+procedure BuildStartTargets(const G: TGameState; var Eligible: TBoolGrid; var Count: Byte);
+var
+  X, Y: Byte;
+begin
+  FillChar(Eligible, SizeOf(Eligible), 0);
+  Count := 0;
+  for Y := 0 to BoardH - 1 do
+    for X := 0 to BoardW - 1 do
+      if not IsPresent(G.Board[X, Y]) then
+      begin
+        Eligible[X, Y] := True;
+        Inc(Count);
+      end;
+end;
+
+function ResolveStartTurn(var G: TGameState; Index: Byte): Boolean;
+var
+  Eligible: TBoolGrid;
+  Count: Byte;
+  SelX, SelY: Byte;
+begin
+  ResolveStartTurn := False;
+  BuildStartTargets(G, Eligible, Count);
+  if Count = 0 then
+  begin
+    G.Phase := gpLoss;
+    AddLog(G, 'No empty board space remains for a starting tile.');
+    Exit;
+  end;
+
+  DrawGame(G);
+  PromptSelectBoardCell(G, Eligible, 'Choose an empty space for this start tile.', SelX, SelY);
+  PlaceStartCell(G, SelX, SelY);
+  G.Prisoners[Index].Started := True;
+  G.Prisoners[Index].Lit := True;
+  G.Prisoners[Index].X := SelX;
+  G.Prisoners[Index].Y := SelY;
+  AddLog(G, PrisonerName(Index) + ' places a start tile and kindles a small flame.');
+
+  RebuildOccupancy(G);
+  ResolveRelights(G);
+  RecomputeLighting(G);
+  CollapseDarkness(G);
+  RebuildOccupancy(G);
+  ClearFreshTiles(G);
+  CheckPhaseTransitions(G);
+  CheckWinLoss(G);
+  ResolveStartTurn := True;
+end;
+
 procedure ResolveStayMonsterReplacement(var G: TGameState; Index: Byte);
 var
   Eligible: TBoolGrid;
@@ -69,31 +119,61 @@ begin
   CheckWinLoss(G);
 end;
 
-function HitCountTotal(const HitCounts: TPrisonerHitCounts): Byte;
+function PopScheduledMonster(var Scheduled: TBoolGrid; var X, Y: Byte): Boolean;
 var
-  I, Total: Byte;
+  SX, SY: Byte;
 begin
-  Total := 0;
-  for I := 0 to PrisonerCount - 1 do
-    Inc(Total, HitCounts[I]);
-  HitCountTotal := Total;
+  PopScheduledMonster := False;
+  for SY := 0 to BoardH - 1 do
+    for SX := 0 to BoardW - 1 do
+      if Scheduled[SX, SY] then
+      begin
+        Scheduled[SX, SY] := False;
+        X := SX;
+        Y := SY;
+        PopScheduledMonster := True;
+        Exit;
+      end;
 end;
 
-procedure ResolveMonsterHits(var G: TGameState; const HitCounts: TPrisonerHitCounts);
+procedure ResolveMonsterHits(var G: TGameState; var Scheduled: TBoolGrid);
 var
-  Victim, HitIndex: Byte;
+  MX, MY, Victim: Byte;
+  VictimMask: Byte;
   Brace: Boolean;
 begin
-  for Victim := 0 to PrisonerCount - 1 do
-    for HitIndex := 1 to HitCounts[Victim] do
+  while PopScheduledMonster(Scheduled, MX, MY) do
+  begin
+    if (not IsPresent(G.Board[MX, MY])) or (G.Board[MX, MY].Feature <> ftMonster) then
+      Continue;
+
+    VictimMask := MonsterVictimMaskAndChains(G, MX, MY, Scheduled);
+    if VictimMask <> 0 then
     begin
-      DrawGame(G);
-      if G.Prisoners[Victim].Nerve > 0 then
-        Brace := PromptYesNo('Wax eater strikes ' + PrisonerName(Victim) + '. Spend nerve?')
-      else
-        Brace := False;
-      ApplyMonsterHit(G, Victim, 1, Brace);
+      for Victim := 0 to PrisonerCount - 1 do
+        if (VictimMask and (1 shl Victim)) <> 0 then
+        begin
+          DrawGame(G);
+          if G.Prisoners[Victim].Nerve > 0 then
+            Brace := PromptYesNo('Wax eater strikes ' + PrisonerName(Victim) + '. Spend nerve?')
+          else
+            Brace := False;
+          ApplyMonsterHit(G, Victim, 1, Brace);
+        end;
+
+      RebuildOccupancy(G);
+      RecomputeLighting(G);
+      CollapseDarkness(G);
+      RebuildOccupancy(G);
+      ResolveRelights(G);
+      RecomputeLighting(G);
+      RebuildOccupancy(G);
+      CheckPhaseTransitions(G);
+      CheckWinLoss(G);
+      if G.Phase in [gpWin, gpLoss] then
+        Exit;
     end;
+  end;
 end;
 
 function ResolveMonsterScramble(var G: TGameState; Index: Byte; const PromptText: string): Boolean;
@@ -132,6 +212,13 @@ begin
     WriteAt(3, 23, PromptText);
     WriteAt(3, 24, MoveText);
     GetAction(G, Cmd, Dir);
+    if Cmd = 'Q' then
+    begin
+      G.Phase := gpLoss;
+      AddLog(G, 'The player abandons the labyrinth.');
+      ResolveMonsterScramble := False;
+      Exit;
+    end;
     if (Cmd = 'M') and ScrambleLandingPrisoner(G, Index, Dir) then
       Break;
   until False;
@@ -139,13 +226,12 @@ end;
 
 function ResolveLandingMonster(var G: TGameState; Index: Byte): Boolean;
 var
-  HitCounts: TPrisonerHitCounts;
+  Scheduled: TBoolGrid;
 begin
   ResolveLandingMonster := True;
   G.PendingLandingMonster := False;
-  BuildLandingMonsterHits(G, Index, HitCounts);
-  if HitCountTotal(HitCounts) > 0 then
-    ResolveMonsterHits(G, HitCounts);
+  BuildLandingTriggeredMonsters(G, Index, Scheduled);
+  ResolveMonsterHits(G, Scheduled);
 
   if PrisonerOnMonster(G, Index) then
     if not ResolveMonsterScramble(G, Index, 'Landing hit: choose a scramble direction.') then
@@ -187,8 +273,8 @@ end;
 procedure PostActionUpdate(var G: TGameState; const BeforeMoveState, AfterMoveState: TGameState;
   Index, OldX, OldY: Byte; DidMove: Boolean);
 var
-  HitCounts: TPrisonerHitCounts;
   RefreshBoard: Boolean;
+  Scheduled: TBoolGrid;
 begin
   RefreshBoard := DidMove or G.Prisoners[Index].Falling;
 
@@ -200,19 +286,16 @@ begin
   end;
 
   if DidMove then
-    BuildMoveMonsterHits(BeforeMoveState, AfterMoveState, Index, OldX, OldY, HitCounts)
+    BuildMoveTriggeredMonsters(BeforeMoveState, AfterMoveState, Index, OldX, OldY, Scheduled)
   else
-    FillChar(HitCounts, SizeOf(HitCounts), 0);
+    FillChar(Scheduled, SizeOf(Scheduled), 0);
 
-  if HitCountTotal(HitCounts) > 0 then
+  ResolveMonsterHits(G, Scheduled);
+  if RefreshBoard then
   begin
-    ResolveMonsterHits(G, HitCounts);
-    if RefreshBoard then
-    begin
-      ResolveRelights(G);
-      RebuildOccupancy(G);
-      RecomputeLighting(G);
-    end;
+    ResolveRelights(G);
+    RebuildOccupancy(G);
+    RecomputeLighting(G);
   end;
 
   if DidMove and PrisonerOnMonster(G, Index) then
@@ -227,6 +310,14 @@ begin
   RebuildOccupancy(G);
   if RefreshBoard then
   begin
+    CollapseDarkness(G);
+    RebuildOccupancy(G);
+  end;
+  if (not DidMove) and G.Prisoners[Index].Falling then
+  begin
+    ResolveRelights(G);
+    RebuildOccupancy(G);
+    RecomputeLighting(G);
     CollapseDarkness(G);
     RebuildOccupancy(G);
   end;
@@ -245,6 +336,14 @@ var
   BeforeMoveState, AfterMoveState: TGameState;
 begin
   ResolveOneAction := False;
+  if (not G.Prisoners[Index].Falling) and (not PrisonerHasAnyMove(G, Index)) and
+     ((G.Prisoners[Index].Lit = False) and (G.Prisoners[Index].Nerve = 0)) then
+  begin
+    G.Phase := gpLoss;
+    AddLog(G, PrisonerName(Index) + ' is lights out and has no legal move.');
+    Exit;
+  end;
+
   Done := False;
   DidMove := False;
   OldX := G.Prisoners[Index].X;
@@ -309,6 +408,26 @@ begin
             else
               AddLog(G, 'No legal landing from that edge.');
           end
+          else if MoveRequiresCharge(G, Index, Dir) then
+          begin
+            if G.Prisoners[Index].Nerve = 0 then
+              AddLog(G, 'Charging a wax eater requires 1 nerve.')
+            else if PromptYesNo('Charge the wax eater and spend 1 nerve?') then
+            begin
+              Dec(G.Prisoners[Index].Nerve);
+              AddLog(G, PrisonerName(Index) + ' charges straight into a wax eater.');
+              if MovePrisoner(G, Index, Dir) then
+              begin
+                DidMove := True;
+                AfterMoveState := G;
+                Done := True;
+              end
+              else
+                AddLog(G, 'No connected passage that way.');
+            end
+            else
+              AddLog(G, 'The prisoner refuses to charge the wax eater.');
+          end
           else if MovePrisoner(G, Index, Dir) then
           begin
             DidMove := True;
@@ -363,6 +482,15 @@ begin
       Break;
 
     Index := G.ActiveIndex;
+    if not G.Prisoners[Index].Started then
+    begin
+      if not ResolveStartTurn(G, Index) then
+        Break;
+      if G.Phase in [gpWin, gpLoss] then
+        Break;
+      AdvanceTurn(G);
+      Continue;
+    end;
     if G.Prisoners[Index].BonusAction then
       G.Prisoners[Index].BonusAction := False;
 
@@ -404,7 +532,7 @@ begin
   if G.Phase = gpWin then
     WriteAt(3, 24, 'Victory. All four prisoners reached the same gate. Press any key.')
   else
-    WriteAt(3, 24, 'Game over. The dark kept the cage. Press any key.            ');
+    WriteAt(3, 24, 'Game over. Eternal Darkness Reigns. Press any key.            ');
   WaitForKey;
 end;
 
@@ -415,12 +543,6 @@ begin
   ClrScr;
   TitleScreen;
   InitGame(Game);
-  RebuildOccupancy(Game);
-  RecomputeLighting(Game);
-  CollapseDarkness(Game);
-  RebuildOccupancy(Game);
-  ClearFreshTiles(Game);
-  CheckWinLoss(Game);
   Game.PromptPlacement := True;
   GameLoop(Game);
   ShowEnding(Game);

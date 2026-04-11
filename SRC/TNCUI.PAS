@@ -50,6 +50,14 @@ begin
   TextAttr := AttrNormal;
 end;
 
+procedure WriteWarning(X, Y: Byte; S: string);
+begin
+  GotoXY(X, Y);
+  TextAttr := AttrBlinkInverse;
+  Write(S);
+  SetNormalText;
+end;
+
 procedure DrawBox(X1, Y1, X2, Y2: Byte);
 var
   X, Y: Byte;
@@ -82,7 +90,8 @@ begin
   Count := 0;
   LastSeen := 0;
   for I := 0 to PrisonerCount - 1 do
-    if G.Prisoners[I].Alive and (not G.Prisoners[I].Falling) and
+    if G.Prisoners[I].Alive and G.Prisoners[I].Started and
+       (not G.Prisoners[I].Falling) and
        (G.Prisoners[I].X = X) and (G.Prisoners[I].Y = Y) then
     begin
       Inc(Count);
@@ -122,6 +131,7 @@ end;
 function ActivePrisonerAtCell(const G: TGameState; X, Y: Byte): Boolean;
 begin
   ActivePrisonerAtCell := G.Prisoners[G.ActiveIndex].Alive and
+                          G.Prisoners[G.ActiveIndex].Started and
                           (not G.Prisoners[G.ActiveIndex].Falling) and
                           (G.Prisoners[G.ActiveIndex].X = X) and
                           (G.Prisoners[G.ActiveIndex].Y = Y);
@@ -221,6 +231,11 @@ begin
   else
     S := ' ';
   S := S + PrisonerName(Index) + ' ';
+  if not G.Prisoners[Index].Started then
+  begin
+    WriteAt(35, Row, S + 'SETUP                               ');
+    Exit;
+  end;
   if G.Prisoners[Index].Lit then
     S := S + 'LIT '
   else
@@ -254,13 +269,17 @@ begin
   V := G.ViewIndex;
   WriteAt(35, 6, 'View : ' + PrisonerName(V) + '                                   ');
 
-  if G.Prisoners[V].Falling then
+  if not G.Prisoners[V].Started then
+    S := 'setup'
+  else if G.Prisoners[V].Falling then
     S := 'falling'
   else
     S := NumStr(G.Prisoners[V].X) + ',' + NumStr(G.Prisoners[V].Y);
   WriteAt(35, 7, 'Pos  : ' + S + '                                    ');
 
-  if G.Prisoners[V].Lit then
+  if not G.Prisoners[V].Started then
+    WriteAt(35, 8, 'Light: not placed yet                         ')
+  else if G.Prisoners[V].Lit then
     WriteAt(35, 8, 'Light: lit                                    ')
   else
     WriteAt(35, 8, 'Light: lights out                             ');
@@ -270,6 +289,8 @@ begin
   else
     S := 'no';
   WriteAt(35, 9, 'Key  : ' + S + '   Nerve: ' + NumStr(G.Prisoners[V].Nerve) + '                         ');
+  WriteAt(58, 7, 'Keys left : ' + NumStr(RemainingKeys(G)) + '           ');
+  WriteAt(58, 8, 'Gates left: ' + NumStr(RemainingGates(G)) + '           ');
 
   WriteAt(35, 10, 'Party');
   for I := 0 to PrisonerCount - 1 do
@@ -282,6 +303,7 @@ var
   StartLine: Byte;
   MoveText: string;
   HelpText: string;
+  WarnText: string;
 begin
   DrawBox(1, 16, 80, 25);
   WriteAt(3, 16, ' Log ');
@@ -297,11 +319,17 @@ begin
     for I := StartLine to G.LogCount - 1 do
       WriteAt(3, 17 + (I - StartLine), LogMessage(G, I));
 
-  WriteAt(3, 20, 'Legend: inverse turn 1-4 prisoners + gate stack  S start  K key');
-  WriteAt(3, 21, '        W wax eater  * crumble  O pit  blank = darkness');
+  WriteAt(3, 20, '                                                                          ');
+  WriteAt(3, 21, '                                                                          ');
   WriteAt(3, 22, 'Turn now: >> ' + PrisonerName(G.ActiveIndex) + ' <<');
+  WarnText := '';
 
-  if G.Prisoners[G.ActiveIndex].Falling then
+  if not G.Prisoners[G.ActiveIndex].Started then
+  begin
+    MoveText := 'Setup: TAB choose cell';
+    WarnText := 'Place this prisoner''s start tile. It becomes the turn''s candlelight.';
+  end
+  else if G.Prisoners[G.ActiveIndex].Falling then
   begin
     MoveText := 'Re-enter:';
     if CanReEnterDirection(G, G.ActiveIndex, dirNorth) then
@@ -314,6 +342,10 @@ begin
       MoveText := MoveText + ' L';
     if Length(MoveText) = 9 then
       MoveText := 'Re-enter: none';
+    WarnText := 'I top of col ' + NumStr(G.Prisoners[G.ActiveIndex].X + 1) +
+                '  J left of row ' + NumStr(G.Prisoners[G.ActiveIndex].Y + 1) +
+                '  K bottom of col ' + NumStr(G.Prisoners[G.ActiveIndex].X + 1) +
+                '  L right of row ' + NumStr(G.Prisoners[G.ActiveIndex].Y + 1);
   end
   else
   begin
@@ -328,10 +360,20 @@ begin
       MoveText := MoveText + ' L';
     if Length(MoveText) = 6 then
       MoveText := 'Moves: none';
+    if PrisonerOnPit(G, G.ActiveIndex) then
+      WarnText := 'WARNING: this prisoner is standing on a pit.'
+    else if PrisonerOnBreakableTile(G, G.ActiveIndex) then
+      WarnText := 'WARNING: this tile will collapse. Stay falls; leaving makes a pit.';
+    if (WarnText = '') and
+       (MoveRequiresCharge(G, G.ActiveIndex, dirNorth) or
+        MoveRequiresCharge(G, G.ActiveIndex, dirWest) or
+        MoveRequiresCharge(G, G.ActiveIndex, dirSouth) or
+        MoveRequiresCharge(G, G.ActiveIndex, dirEast)) then
+      WarnText := 'WARNING: stepping onto W while lit spends 1 nerve to charge.';
   end;
 
   HelpText := '   N extra action  TAB view  Q quit';
-  if not G.Prisoners[G.ActiveIndex].Falling then
+  if G.Prisoners[G.ActiveIndex].Started and (not G.Prisoners[G.ActiveIndex].Falling) then
   begin
     if CanPassKey(G, G.ActiveIndex) then
       HelpText := '   P pass key' + HelpText;
@@ -344,12 +386,16 @@ begin
   end;
 
   WriteAt(3, 23, MoveText + HelpText);
-  if G.Prisoners[G.ActiveIndex].Falling then
+  if WarnText <> '' then
+    WriteWarning(3, 21, WarnText);
+  if not G.Prisoners[G.ActiveIndex].Started then
+    WriteAt(3, 24, 'Opening turn: choose any empty board space, then place the start tile.     ')
+  else if G.Prisoners[G.ActiveIndex].Falling then
     WriteAt(3, 24, 'Falling turn: choose one of the shown re-entry directions.                ')
   else if not G.Prisoners[G.ActiveIndex].Lit then
     WriteAt(3, 24, 'Lights out: must move. Only the destination is revealed this turn.        ')
   else
-    WriteAt(3, 24, 'Movement keys: I up, J left, K down, L right.                             ');
+    WriteAt(3, 24, '                                                                            ');
 end;
 
 procedure DrawGame(const G: TGameState);
@@ -369,7 +415,7 @@ begin
   ClrScr;
   DrawBox(8, 4, 73, 21);
   WriteAt(21, 6, 'THE NIGHT CAGE - DOS TEXT PROTOTYPE');
-  WriteAt(12, 8, 'Four prisoners wake in separate pools of candlelight.');
+  WriteAt(12, 8, 'Each prisoner places a start tile on the first turn.');
   WriteAt(12, 9, 'Keep the maze lit, gather 4 keys, then meet on one gate.');
   WriteAt(12, 10, 'Wax eaters hunt straight passages. Darkness devours the rest.');
   WriteAt(12, 12, 'Symbols: inverse active 1-4 prisoners  S start  K key  G gate');
@@ -465,7 +511,7 @@ begin
     WriteAt(3, 23, '                                                                            ');
     WriteAt(3, 24, '                                                                            ');
     WriteAt(3, 23, Prompt);
-    WriteAt(3, 24, 'TAB cycle target   ENTER place wax eater');
+    WriteAt(3, 24, 'TAB cycle target   ENTER confirm');
     Ch := ReadKey;
     if Ch = #9 then
     begin

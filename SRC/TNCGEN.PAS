@@ -12,7 +12,9 @@ function CanGenerateCell(const G: TGameState; X, Y: Byte; RequiredDir: TDirectio
 function GenerateCell(var G: TGameState; X, Y: Byte; RequiredDir: TDirection): Boolean;
 function PlaceIlluminationTile(var G: TGameState; const Eligible: TBoolGrid;
   const RequiredDirs: TDirGrid): Boolean;
+procedure PlaceStartCell(var G: TGameState; X, Y: Byte);
 function PlaceFreeTileAt(var G: TGameState; X, Y: Byte): Boolean;
+function PlaceFreeTileAtAuto(var G: TGameState; X, Y: Byte): Boolean;
 procedure DiscardDrawTiles(var G: TGameState; Count: Byte);
 function DrawTopTile(var G: TGameState; var Tile: TDrawTile; Lost: Boolean): Boolean;
 
@@ -36,7 +38,7 @@ begin
     PreviewScreenY := BoardCellScreenY(Y);
 end;
 
-procedure SetStartCell(var G: TGameState; X, Y: Byte);
+procedure PlaceStartCell(var G: TGameState; X, Y: Byte);
 begin
   ClearCell(G.Board[X, Y]);
   G.Board[X, Y].Kind := tkStart;
@@ -559,6 +561,27 @@ begin
   PlaceFreeTileAt := True;
 end;
 
+function PlaceFreeTileAtAuto(var G: TGameState; X, Y: Byte): Boolean;
+var
+  Tile: TDrawTile;
+begin
+  PlaceFreeTileAtAuto := False;
+  if (G.Phase <> gpMaze) or (G.DrawsRemaining = 0) then
+    Exit;
+  if IsPresent(G.Board[X, Y]) then
+    Exit;
+  if not DrawTopTile(G, Tile, False) then
+    Exit;
+
+  ClearCell(G.Board[X, Y]);
+  G.Board[X, Y].Kind := Tile.Kind;
+  G.Board[X, Y].Rot := 0;
+  G.Board[X, Y].Feature := Tile.Feature;
+  G.Board[X, Y].Flags := [cfPresent, cfFresh];
+  G.Board[X, Y].LastLitTurn := 0;
+  PlaceFreeTileAtAuto := True;
+end;
+
 procedure DiscardDrawTiles(var G: TGameState; Count: Byte);
 var
   I: Byte;
@@ -644,9 +667,7 @@ end;
 
 procedure InitGame(var G: TGameState);
 var
-  I, J, Tmp: Byte;
-  BaseX, BaseY, HalfW, HalfH: Byte;
-  StartX, StartY: array[0..PrisonerCount - 1] of Byte;
+  I: Byte;
 begin
   FillChar(G, SizeOf(G), 0);
   ClearBoard(G);
@@ -665,49 +686,19 @@ begin
 
   for I := 0 to PrisonerCount - 1 do
   begin
+    G.Prisoners[I].Started := False;
     G.Prisoners[I].Lit := True;
     G.Prisoners[I].HasKey := False;
     G.Prisoners[I].Falling := False;
     G.Prisoners[I].Alive := True;
     G.Prisoners[I].BonusAction := False;
     G.Prisoners[I].Nerve := StartNerve;
+    G.Prisoners[I].X := 0;
+    G.Prisoners[I].Y := 0;
   end;
 
-  HalfW := BoardW div 2;
-  HalfH := BoardH div 2;
-  BaseX := RandomRange(G.RNGSeed, HalfW);
-  BaseY := RandomRange(G.RNGSeed, HalfH);
-
-  StartX[0] := BaseX;
-  StartY[0] := BaseY;
-  StartX[1] := WrapX(Integer(BaseX) + HalfW);
-  StartY[1] := BaseY;
-  StartX[2] := BaseX;
-  StartY[2] := WrapY(Integer(BaseY) + HalfH);
-  StartX[3] := WrapX(Integer(BaseX) + HalfW);
-  StartY[3] := WrapY(Integer(BaseY) + HalfH);
-
-  { Shuffle prisoner assignment without risking an endless retry on 6x6. }
-  for I := 0 to PrisonerCount - 1 do
-  begin
-    J := RandomRange(G.RNGSeed, PrisonerCount);
-    Tmp := StartX[I];
-    StartX[I] := StartX[J];
-    StartX[J] := Tmp;
-    Tmp := StartY[I];
-    StartY[I] := StartY[J];
-    StartY[J] := Tmp;
-  end;
-
-  for I := 0 to PrisonerCount - 1 do
-  begin
-    SetStartCell(G, StartX[I], StartY[I]);
-    G.Prisoners[I].X := StartX[I];
-    G.Prisoners[I].Y := StartY[I];
-  end;
-
-  AddLog(G, 'Four prisoners wake far apart in the dark.');
-  AddLog(G, 'I/J/K/L move. S stays. N spends nerve. TAB changes focus.');
+  AddLog(G, 'Each prisoner must place a starting tile on the first turn.');
+  AddLog(G, 'TAB cycles targets. ENTER confirms. I/J/K/L move after setup.');
 end;
 
 end.
