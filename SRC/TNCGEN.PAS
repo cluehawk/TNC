@@ -12,7 +12,8 @@ function CanGenerateCell(const G: TGameState; X, Y: Byte; RequiredDir: TDirectio
 function GenerateCell(var G: TGameState; X, Y: Byte; RequiredDir: TDirection): Boolean;
 function PlaceIlluminationTile(var G: TGameState; const Eligible: TBoolGrid;
   const RequiredDirs: TDirGrid): Boolean;
-procedure PlaceStartCell(var G: TGameState; X, Y: Byte);
+function ChooseStartRotation(var G: TGameState; X, Y: Byte): Byte;
+procedure PlaceStartCell(var G: TGameState; X, Y, Rot: Byte);
 function PlaceFreeTileAt(var G: TGameState; X, Y: Byte): Boolean;
 function PlaceFreeTileAtAuto(var G: TGameState; X, Y: Byte): Boolean;
 procedure DiscardDrawTiles(var G: TGameState; Count: Byte);
@@ -38,11 +39,11 @@ begin
     PreviewScreenY := BoardCellScreenY(Y);
 end;
 
-procedure PlaceStartCell(var G: TGameState; X, Y: Byte);
+procedure PlaceStartCell(var G: TGameState; X, Y, Rot: Byte);
 begin
   ClearCell(G.Board[X, Y]);
   G.Board[X, Y].Kind := tkStart;
-  G.Board[X, Y].Rot := 0;
+  G.Board[X, Y].Rot := Rot mod 4;
   G.Board[X, Y].Feature := ftNone;
   G.Board[X, Y].Flags := [cfPresent, cfFresh];
 end;
@@ -146,7 +147,7 @@ begin
   for I := 1 to 10 do
     PushDrawTile(G, Count, tkCross, ftNone);
   for I := 1 to 6 do
-    PushDrawTile(G, Count, tkTJunction, ftKey);
+    PushDrawTile(G, Count, tkCross, ftKey);
   for I := 1 to 4 do
     PushDrawTile(G, Count, tkCross, ftGate);
   for I := 1 to 12 do
@@ -422,6 +423,15 @@ begin
   ClearPreviewTile(X, Y);
   ClearPromptLines;
   ChooseFreeRotation := Rot;
+end;
+
+function ChooseStartRotation(var G: TGameState; X, Y: Byte): Byte;
+var
+  Tile: TDrawTile;
+begin
+  Tile.Kind := tkStart;
+  Tile.Feature := ftNone;
+  ChooseStartRotation := ChooseFreeRotation(G, X, Y, Tile);
 end;
 
 function DrawTopTile(var G: TGameState; var Tile: TDrawTile; Lost: Boolean): Boolean;

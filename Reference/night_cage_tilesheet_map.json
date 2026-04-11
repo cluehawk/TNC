@@ -1,0 +1,104 @@
+{
+  "tile_size": {
+    "width": 32,
+    "height": 24
+  },
+  "combined_sheet": {
+    "filename": "night_cage_tilesheet_32x24.png",
+    "layout": {
+      "columns": 3,
+      "rows": 3
+    },
+    "order": [
+      "BASE_STRAIGHT_NS",
+      "BASE_T_NSE",
+      "BASE_CROSS",
+      "BASE_PIT",
+      "OVERLAY_START",
+      "OVERLAY_KEY",
+      "OVERLAY_GATE",
+      "OVERLAY_WAX",
+      "OVERLAY_CRUMBLE"
+    ],
+    "positions": {
+      "BASE_STRAIGHT_NS": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "BASE_T_NSE": {
+        "x": 32,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "BASE_CROSS": {
+        "x": 64,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "BASE_PIT": {
+        "x": 0,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      },
+      "OVERLAY_START": {
+        "x": 32,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      },
+      "OVERLAY_KEY": {
+        "x": 64,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      },
+      "OVERLAY_GATE": {
+        "x": 0,
+        "y": 48,
+        "w": 32,
+        "h": 24
+      },
+      "OVERLAY_WAX": {
+        "x": 32,
+        "y": 48,
+        "w": 32,
+        "h": 24
+      },
+      "OVERLAY_CRUMBLE": {
+        "x": 64,
+        "y": 48,
+        "w": 32,
+        "h": 24
+      }
+    }
+  },
+  "base_sheet": {
+    "filename": "night_cage_base_tiles_32x24.png",
+    "order": [
+      "BASE_STRAIGHT_NS",
+      "BASE_T_NSE",
+      "BASE_CROSS",
+      "BASE_PIT"
+    ]
+  },
+  "overlay_sheet": {
+    "filename": "night_cage_overlay_tiles_32x24.png",
+    "order": [
+      "OVERLAY_START",
+      "OVERLAY_KEY",
+      "OVERLAY_GATE",
+      "OVERLAY_WAX",
+      "OVERLAY_CRUMBLE"
+    ]
+  },
+  "notes": [
+    "Images are monochrome: black background with white pixels.",
+    "Base and overlay sheets are separated to match the layering model in the source notes.",
+    "The combined sheet is convenient for quick loading and inspection."
+  ]
+}

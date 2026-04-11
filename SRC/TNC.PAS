@@ -38,6 +38,7 @@ var
   Eligible: TBoolGrid;
   Count: Byte;
   SelX, SelY: Byte;
+  Rot: Byte;
 begin
   ResolveStartTurn := False;
   BuildStartTargets(G, Eligible, Count);
@@ -50,7 +51,8 @@ begin
 
   DrawGame(G);
   PromptSelectBoardCell(G, Eligible, 'Choose an empty space for this start tile.', SelX, SelY);
-  PlaceStartCell(G, SelX, SelY);
+  Rot := ChooseStartRotation(G, SelX, SelY);
+  PlaceStartCell(G, SelX, SelY, Rot);
   G.Prisoners[Index].Started := True;
   G.Prisoners[Index].Lit := True;
   G.Prisoners[Index].X := SelX;

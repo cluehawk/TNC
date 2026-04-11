@@ -152,7 +152,10 @@ begin
                 Inc(Count);
               end;
             end;
-            if IsPresent(G.Board[NX, NY]) then
+            if IsPresent(G.Board[NX, NY]) and
+               (((G.Board[NX, NY].Kind = tkPit)) or
+                (CellOpen(G.Board[X, Y], D) and
+                 CellOpen(G.Board[NX, NY], OppositeDir(D)))) then
             begin
               G.Board[NX, NY].Flags := G.Board[NX, NY].Flags + [cfLit];
               G.Board[NX, NY].LastLitTurn := G.TurnNumber;

@@ -1,0 +1,88 @@
+THE NIGHT CAGE
+640x200 CGA MODE 6 LAYOUT NOTES
+
+Target mode:
+- 640x200 CGA
+- 1-bit only
+- black background, white pixels
+- assume vertically stretched display on a 4:3 monitor
+
+Recommended tile size:
+- 32x24 pixels
+
+Why 32x24:
+- appears closer to square on real CGA hardware
+- leaves enough room for passages plus a readable icon overlay
+- easy to hand-pixel in a monochrome style
+
+Board footprint:
+- 6 tiles wide x 32 = 192 pixels
+- 6 tiles high x 24 = 144 pixels
+- with 1-pixel grid lines around and between tiles:
+  width  = 192 + 7 = 199
+  height = 144 + 7 = 151
+
+Recommended screen regions:
+- board:   x=8..206   y=8..158
+- status:  x=216..631 y=8..118
+- log:     x=216..631 y=124..192
+- optional board title: x=8..120 y=0..7
+
+Suggested board drawing:
+- 1-pixel white frame
+- 1-pixel white internal grid lines
+- each tile interior uses 32x24 pixels
+- keep all tile art inside the cell interior
+
+Layering model:
+1. base passage tile
+2. overlay symbol if present
+3. prisoner marker
+4. selection / active highlight
+
+Starter base tiles:
+- corner
+- straight
+- T junction
+- 4-way
+- pit
+
+Starter overlays:
+- start marker
+- key
+- gate
+- wax eater
+- crumble
+
+Monochrome art rules:
+- corridors should be bold and obvious at a distance
+- walls should stay mostly black
+- overlays should sit near the center of the tile
+- use sparse internal texture only
+- avoid tiny 1-pixel details unless they matter to silhouette
+
+Prisoner marker idea:
+- 8x8 or 10x10 glyph drawn over tile center
+- inverted rectangle or white ring with black numeral
+
+Selection / active idea:
+- use attribute highlight in text mode builds
+- in graphics mode use either:
+  - white outline box inside the tile
+  - blinking border if hardware style is desired
+
+First graphical milestone:
+- render board using only:
+  - corner
+  - straight
+  - T junction
+  - 4-way
+  - pit
+  - start marker on corner base
+  - key marker on 4-way base
+  - gate/wax/crumble overlays
+- keep rotations in code, not as separate art files
+
+Known fixed shape assumptions:
+- Start tiles are corner tiles
+- Key tiles are always 4-way tiles

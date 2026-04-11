@@ -167,7 +167,7 @@ function OpenMask(Kind: TTileKind; Rot: Byte): Byte;
 begin
   case Kind of
     tkVoid:      OpenMask := 0;
-    tkStart:     OpenMask := 15;
+    tkStart:     OpenMask := RotateMask(3, Rot mod 4);
     tkStraight:  OpenMask := RotateMask(5, Rot mod 2);
     tkCorner:    OpenMask := RotateMask(3, Rot mod 4);
     tkTJunction: OpenMask := RotateMask(7, Rot mod 4);
@@ -195,14 +195,14 @@ begin
 
   Mask := OpenMask(Kind, Rot);
   case Mask of
-     3: TileGlyph := Chr(191);
+     3: TileGlyph := Chr(192);
      5: TileGlyph := Chr(186);
      6: TileGlyph := Chr(218);
      7: TileGlyph := Chr(204);
      9: TileGlyph := Chr(217);
     10: TileGlyph := Chr(205);
     11: TileGlyph := Chr(202);
-    12: TileGlyph := Chr(192);
+    12: TileGlyph := Chr(191);
     13: TileGlyph := Chr(185);
     14: TileGlyph := Chr(203);
     15: TileGlyph := Chr(206);
