@@ -1,0 +1,455 @@
+{
+  "tile_size": {
+    "width": 32,
+    "height": 24
+  },
+  "style": "wide black tunnels with dithered white cave walls",
+  "base_sheet": {
+    "filename": "night_cage_base_tiles_32x24.png",
+    "columns": 4,
+    "rows": 4,
+    "order": [
+      "base_straight_crumble_NS",
+      "base_straight_crumble_EW",
+      "base_t_NSE",
+      "base_t_NEW",
+      "base_t_NSW",
+      "base_t_ESW",
+      "base_cross_NESW",
+      "base_Start_crumble_NW",
+	  "base_Start_crumble_NE",
+	  "base_Start_crumble_SE",
+	  "base_Start_crumble_SW",
+	  "base_Key_crumble_NESW",
+	  "base_Gate_NESW",
+	  "base_Wax_Eater_NESW",
+	  
+    ],
+    "positions": {
+      "base_straight_crumble_NS": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "base_straight_crumble_EW": {
+        "x": 32,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "base_t_NSE": {
+        "x": 64,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "base_t_NEW": {
+        "x": 96,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "base_t_NSW": {
+        "x": 0,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      },
+      "base_t_ESW": {
+        "x": 32,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      },
+      "base_cross_NESW": {
+        "x": 64,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      },
+      "base_pit_NESW": {
+        "x": 96,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      },
+	  "base_Start_NW": {
+        "x": 0,
+        "y": 48,
+        "w": 32,
+        "h": 24
+      },
+	  "base_Start_SE": {
+        "x": 32,
+        "y": 48,
+        "w": 32,
+        "h": 24
+      },
+	  "base_Start_SW": {
+        "x": 64,
+        "y": 48,
+        "w": 32,
+        "h": 24
+      },
+	  "base_Key_crumble_NESW": {
+        "x": 0,
+        "y": 72,
+        "w": 32,
+        "h": 24
+      },
+	  "base_Gate_NESW": {
+        "x": 32,
+        "y": 72,
+        "w": 32,
+        "h": 24
+      },
+	  "base_Wax_Eater_NESW": {
+        "x": 64,
+        "y": 72,
+        "w": 32,
+        "h": 24
+      }
+    }
+  },
+  "overlay_sheet": {
+    "filename": "night_cage_overlays_various.png",
+    "columns": various,
+    "rows": various,
+    "order": [
+      "overlay_player_South_1",
+      "overlay_player_South_2",
+      "overlay_player_South_3",
+      "overlay_player_East_1",
+      "overlay_player_East_2",
+      "overlay_player_East_3",
+      "overlay_player_East_4",
+      "overlay_player_West_1",
+      "overlay_player_West_2",
+      "overlay_player_West_3",
+      "overlay_player_West_4",
+	  "overlay_player_North_1",
+	  "overlay_player_North_2",
+	  "overlay_player_North_3",
+	  "overlay_player_North_4",
+	  "overlay_player_South_4",
+	  "overlay_number_1",
+	  "overlay_number_2",
+	  "overlay_number_3",
+	  "overlay_number_4",
+    ],
+    "positions": {
+      "overlay_player_South_1": {
+        "x": 96,
+        "y": 72,
+        "w": 9,
+        "h": 21
+      },
+      "overlay_player_South_2": {
+        "x": 105,
+        "y": 72,
+        "w": 9,
+        "h": 21
+      },
+      "overlay_player_South_3": {
+        "x": 114,
+        "y": 72,
+        "w": 9,
+        "h": 21
+      },
+      "overlay_player_East_1": {
+        "x": 0,
+        "y": 96,
+        "w": 23,
+        "h": 8
+      },
+      "overlay_player_East_2": {
+        "x": 0,
+        "y": 104,
+        "w": 23,
+        "h": 8
+      },
+      "overlay_player_East_3": {
+        "x": 0,
+        "y": 112,
+        "w": 23,
+        "h": 8
+      },
+      "overlay_player_East_4": {
+        "x": 23,
+        "y": 96,
+        "w": 23,
+        "h": 8
+      },
+      "overlay_player_West_1": {
+        "x": 23,
+        "y": 104,
+        "w": 23,
+        "h": 8
+      },
+      "overlay_player_West_2": {
+        "x": 23,
+        "y": 112,
+        "w": 23,
+        "h": 8
+      },
+      "overlay_player_West_3": {
+        "x": 46,
+        "y": 96,
+        "w": 32,
+        "h": 24
+      },
+      "overlay_player_West_4": {
+        "x": 46,
+        "y": 104,
+        "w": 32,
+        "h": 24
+      },
+	  "overlay_player_North_1": {
+        "x": 64,
+        "y": 48,
+        "w": 32,
+        "h": 24
+      },
+	  "overlay_player_North_2": {
+        "x": 69,
+        "y": 96,
+        "w": 32,
+        "h": 24
+      },
+	  "overlay_player_North_3": {
+        "x": 78,
+        "y": 96,
+        "w": 32,
+        "h": 24
+      },
+	  "overlay_player_North_4": {
+        "x": 96,
+        "y": 96,
+        "w": 32,
+        "h": 24
+      },
+	  "overlay_player_South_4": {
+        "x": 105,
+        "y": 96,
+        "w": 32,
+        "h": 24
+      },
+	  "overlay_number_1": {
+        "x": 114,
+        "y": 96,
+        "w": 4,
+        "h": 6
+      },
+	  "overlay_number_2": {
+        "x": 119,
+        "y": 96,
+        "w": 4,
+        "h": 6
+      },
+	  "overlay_number_3": {
+        "x": 124,
+        "y": 96,
+        "w": 4,
+        "h": 6
+      },
+	  "overlay_number_4": {
+        "x": 114,
+        "y": 102,
+        "w": 4,
+        "h": 6
+      }
+    }
+  },
+  "combined_sheet": {
+    "filename": "night_cage_cave_wide_tilesheet_32x24.png",
+    "columns": 4,
+    "rows": 5,
+    "order": [
+      "base_straight_ns_cave_wide",
+      "base_straight_ew_cave_wide",
+      "base_t_nse_cave_wide",
+      "base_t_esw_cave_wide",
+      "base_t_swn_cave_wide",
+      "base_t_wne_cave_wide",
+      "base_cross_cave_wide",
+      "base_pit_cave_wide",
+      "overlay_start_cave_wide",
+      "overlay_key_n_cave_wide",
+      "overlay_key_e_cave_wide",
+      "overlay_key_s_cave_wide",
+      "overlay_key_w_cave_wide",
+      "overlay_gate_n_cave_wide",
+      "overlay_gate_e_cave_wide",
+      "overlay_gate_s_cave_wide",
+      "overlay_gate_w_cave_wide",
+      "overlay_wax_cave_wide",
+      "overlay_crumble_cave_wide"
+    ],
+    "positions": {
+      "base_straight_ns_cave_wide": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "base_straight_ew_cave_wide": {
+        "x": 32,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "base_t_nse_cave_wide": {
+        "x": 64,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "base_t_esw_cave_wide": {
+        "x": 96,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "base_t_swn_cave_wide": {
+        "x": 0,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      },
+      "base_t_wne_cave_wide": {
+        "x": 32,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      },
+      "base_cross_cave_wide": {
+        "x": 64,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      },
+      "base_pit_cave_wide": {
+        "x": 96,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      },
+      "overlay_start_cave_wide": {
+        "x": 0,
+        "y": 48,
+        "w": 32,
+        "h": 24
+      },
+      "overlay_key_n_cave_wide": {
+        "x": 32,
+        "y": 48,
+        "w": 32,
+        "h": 24
+      },
+      "overlay_key_e_cave_wide": {
+        "x": 64,
+        "y": 48,
+        "w": 32,
+        "h": 24
+      },
+      "overlay_key_s_cave_wide": {
+        "x": 96,
+        "y": 48,
+        "w": 32,
+        "h": 24
+      },
+      "overlay_key_w_cave_wide": {
+        "x": 0,
+        "y": 72,
+        "w": 32,
+        "h": 24
+      },
+      "overlay_gate_n_cave_wide": {
+        "x": 32,
+        "y": 72,
+        "w": 32,
+        "h": 24
+      },
+      "overlay_gate_e_cave_wide": {
+        "x": 64,
+        "y": 72,
+        "w": 32,
+        "h": 24
+      },
+      "overlay_gate_s_cave_wide": {
+        "x": 96,
+        "y": 72,
+        "w": 32,
+        "h": 24
+      },
+      "overlay_gate_w_cave_wide": {
+        "x": 0,
+        "y": 96,
+        "w": 32,
+        "h": 24
+      },
+      "overlay_wax_cave_wide": {
+        "x": 32,
+        "y": 96,
+        "w": 32,
+        "h": 24
+      },
+      "overlay_crumble_cave_wide": {
+        "x": 64,
+        "y": 96,
+        "w": 32,
+        "h": 24
+      }
+    }
+  },
+  "sample_sheet": {
+    "filename": "night_cage_cave_wide_samples_32x24.png",
+    "columns": 3,
+    "rows": 2,
+    "order": [
+      "sample_straight_key_cave_wide",
+      "sample_t_gate_cave_wide",
+      "sample_cross_wax_cave_wide",
+      "sample_straight_crumble_cave_wide",
+      "sample_pit_start_cave_wide"
+    ],
+    "positions": {
+      "sample_straight_key_cave_wide": {
+        "x": 0,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "sample_t_gate_cave_wide": {
+        "x": 32,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "sample_cross_wax_cave_wide": {
+        "x": 64,
+        "y": 0,
+        "w": 32,
+        "h": 24
+      },
+      "sample_straight_crumble_cave_wide": {
+        "x": 0,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      },
+      "sample_pit_start_cave_wide": {
+        "x": 32,
+        "y": 24,
+        "w": 32,
+        "h": 24
+      }
+    }
+  },
+  "design_notes": {
+    "change": "Hand Made",
+    "walls": "heavier dithered cave masses with rough edge chips",
+    "goal": "more organic cavern look while keeping objects readable against black tunnel space"
+  }
+}
