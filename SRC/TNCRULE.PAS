@@ -13,6 +13,7 @@ function CanMoveDirection(const G: TGameState; Index: Byte; Dir: TDirection): Bo
 function MoveRequiresCharge(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function MovePrisoner(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function StayPrisoner(var G: TGameState; Index: Byte): Boolean;
+procedure ApplyPendingNerve(var G: TGameState; Index: Byte);
 function CanPassKey(const G: TGameState; Index: Byte): Boolean;
 procedure BuildKeyPassTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
   var Count: Byte);
@@ -362,7 +363,6 @@ function StayPrisoner(var G: TGameState; Index: Byte): Boolean;
 var
   X, Y: Byte;
   Tile: TDrawTile;
-  GainedNerve: Boolean;
   DarkStay: Boolean;
 begin
   StayPrisoner := False;
@@ -370,6 +370,7 @@ begin
      (not G.Prisoners[Index].Started) then
     Exit;
 
+  G.Prisoners[Index].NervePending := False;
   DarkStay := not G.Prisoners[Index].Lit;
   if not G.Prisoners[Index].Lit then
   begin
@@ -379,22 +380,16 @@ begin
     AddLog(G, PrisonerName(Index) + ' spends 1 nerve to hold still in darkness.');
   end;
 
-  GainedNerve := False;
-  if (not DarkStay) and (G.Prisoners[Index].Nerve < MaxNerve) then
-  begin
-    Inc(G.Prisoners[Index].Nerve);
-    GainedNerve := True;
-  end;
+  if not DarkStay then
+    G.Prisoners[Index].NervePending := True;
 
   X := G.Prisoners[Index].X;
   Y := G.Prisoners[Index].Y;
   AddLog(G, PrisonerName(Index) + ' stays put.');
   if DarkStay then
     AddLog(G, 'Lights out staying costs 1 nerve and gains none back.')
-  else if GainedNerve then
-    AddLog(G, PrisonerName(Index) + ' gathers 1 nerve.')
   else
-    AddLog(G, PrisonerName(Index) + ' is already at full nerve.');
+    AddLog(G, PrisonerName(Index) + ' will gain nerve after the turn.');
 
   if DrawTopTile(G, Tile, True) then
   begin
@@ -426,6 +421,23 @@ begin
   end;
 
   StayPrisoner := True;
+end;
+
+procedure ApplyPendingNerve(var G: TGameState; Index: Byte);
+begin
+  if Index >= PrisonerCount then
+    Exit;
+  if not G.Prisoners[Index].NervePending then
+    Exit;
+
+  G.Prisoners[Index].NervePending := False;
+  if G.Prisoners[Index].Nerve < MaxNerve then
+  begin
+    Inc(G.Prisoners[Index].Nerve);
+    AddLog(G, PrisonerName(Index) + ' gains 1 nerve at turn end.');
+  end
+  else
+    AddLog(G, PrisonerName(Index) + ' ends the turn at full nerve.');
 end;
 
 procedure BuildKeyPassTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
@@ -1043,35 +1055,59 @@ var
 begin
   FillChar(Eligible, SizeOf(Eligible), 0);
   Count := 0;
+
+  { An occupied tile is a last resort, not a protected space. }
   for X := 0 to BoardW - 1 do
     for Y := 0 to BoardH - 1 do
-    if IsPresent(G.Board[X, Y]) and
-       (cfLit in G.Board[X, Y].Flags) and
-       not (cfPermanent in G.Board[X, Y].Flags) and
-       not (cfOccupied in G.Board[X, Y].Flags) then
-    begin
-      Eligible[X, Y] := True;
-      Inc(Count);
-    end;
+      if IsPresent(G.Board[X, Y]) and
+         (cfLit in G.Board[X, Y].Flags) and
+         not (cfPermanent in G.Board[X, Y].Flags) and
+         not (cfOccupied in G.Board[X, Y].Flags) then
+      begin
+        Eligible[X, Y] := True;
+        Inc(Count);
+      end;
+
+  if Count = 0 then
+    for X := 0 to BoardW - 1 do
+      for Y := 0 to BoardH - 1 do
+        if IsPresent(G.Board[X, Y]) and
+           (cfLit in G.Board[X, Y].Flags) and
+           not (cfPermanent in G.Board[X, Y].Flags) and
+           (cfOccupied in G.Board[X, Y].Flags) then
+        begin
+          Eligible[X, Y] := True;
+          Inc(Count);
+        end;
 end;
 
 function RemoveFlickerTileAt(var G: TGameState; X, Y: Byte): Boolean;
+var
+  Eligible: TBoolGrid;
+  Count: Byte;
+  WasOccupied: Boolean;
 begin
   RemoveFlickerTileAt := False;
   if (X >= BoardW) or (Y >= BoardH) then
     Exit;
-  if (not IsPresent(G.Board[X, Y])) or
-     (not (cfLit in G.Board[X, Y].Flags)) or
-     (cfPermanent in G.Board[X, Y].Flags) or
-     (cfOccupied in G.Board[X, Y].Flags) then
+
+  BuildFlickerTargets(G, Eligible, Count);
+  if (Count = 0) or (not Eligible[X, Y]) then
     Exit;
 
+  WasOccupied := cfOccupied in G.Board[X, Y].Flags;
   if IsKeyTileFeature(G.Board[X, Y].Feature) then
     Inc(G.LostKeys);
   if G.Board[X, Y].Feature = ftGate then
     Inc(G.LostGates);
   ClearCell(G.Board[X, Y]);
-  AddLog(G, 'The chosen final flicker is swallowed by darkness.');
+  if WasOccupied then
+  begin
+    G.Phase := gpLoss;
+    AddLog(G, 'A final flicker opens beneath a prisoner.');
+  end
+  else
+    AddLog(G, 'The chosen final flicker is swallowed by darkness.');
   RemoveFlickerTileAt := True;
 end;
 
@@ -1110,9 +1146,14 @@ begin
 end;
 
 function RemainingKeys(const G: TGameState): Byte;
+var
+  Count: Byte;
 begin
-  RemainingKeys := CountHeldKeys(G) + CountBoardFeature(G, ftKey) +
-                   CountBoardFeature(G, ftKeyArmed) + G.FeatureKeys;
+  Count := CountHeldKeys(G) + CountBoardFeature(G, ftKey) +
+           CountBoardFeature(G, ftKeyArmed);
+  if G.Phase = gpMaze then
+    Inc(Count, G.FeatureKeys);
+  RemainingKeys := Count;
 end;
 
 function RemainingGates(const G: TGameState): Byte;
@@ -1123,6 +1164,142 @@ begin
   if G.Phase = gpMaze then
     Inc(Count, G.FeatureGates);
   RemainingGates := Count;
+end;
+
+type
+  TReachByPrisoner = array[0..PrisonerCount - 1] of TBoolGrid;
+  TReachQueue = array[0..(BoardW * BoardH) - 1] of Byte;
+
+procedure BuildPrisonerReach(const G: TGameState; Index: Byte; var Reach: TBoolGrid);
+var
+  QueueX, QueueY: TReachQueue;
+  Head, Tail: Byte;
+  X, Y, NX, NY: Byte;
+  D: TDirection;
+
+  procedure Enqueue(TX, TY: Byte);
+  begin
+    if IsPassable(G.Board[TX, TY]) and (not Reach[TX, TY]) then
+    begin
+      Reach[TX, TY] := True;
+      QueueX[Tail] := TX;
+      QueueY[Tail] := TY;
+      Inc(Tail);
+    end;
+  end;
+
+  procedure AddFallLandings(FX, FY: Byte);
+  var
+    K: Byte;
+    FullLine: Boolean;
+  begin
+    { With no Draw Stack, an existing tile can be used only when the chosen
+      row or column contains no empty landing space. }
+    FullLine := True;
+    for K := 0 to BoardW - 1 do
+      if not IsPresent(G.Board[K, FY]) then
+        FullLine := False;
+    if FullLine then
+      for K := 0 to BoardW - 1 do
+        Enqueue(K, FY);
+
+    FullLine := True;
+    for K := 0 to BoardH - 1 do
+      if not IsPresent(G.Board[FX, K]) then
+        FullLine := False;
+    if FullLine then
+      for K := 0 to BoardH - 1 do
+        Enqueue(FX, K);
+  end;
+
+begin
+  FillChar(Reach, SizeOf(Reach), 0);
+  Head := 0;
+  Tail := 0;
+  if (Index >= PrisonerCount) or (not G.Prisoners[Index].Alive) or
+     (not G.Prisoners[Index].Started) then
+    Exit;
+
+  if G.Prisoners[Index].Falling then
+    AddFallLandings(G.Prisoners[Index].X, G.Prisoners[Index].Y)
+  else
+    Enqueue(G.Prisoners[Index].X, G.Prisoners[Index].Y);
+
+  while Head < Tail do
+  begin
+    X := QueueX[Head];
+    Y := QueueY[Head];
+    Inc(Head);
+
+    for D := dirNorth to dirWest do
+      if CellOpen(G.Board[X, Y], D) then
+      begin
+        NX := WrapX(Integer(X) + DirX[D]);
+        NY := WrapY(Integer(Y) + DirY[D]);
+        if IsPassable(G.Board[NX, NY]) and
+           CellOpen(G.Board[NX, NY], OppositeDir(D)) then
+          Enqueue(NX, NY)
+        else if IsPitCell(G.Board[NX, NY]) then
+          AddFallLandings(NX, NY);
+      end;
+
+    if TileBreaksOnUse(G.Board[X, Y]) then
+      AddFallLandings(X, Y);
+  end;
+end;
+
+procedure BuildFinalReachability(const G: TGameState; var Reach: TReachByPrisoner);
+var
+  I: Byte;
+begin
+  for I := 0 to PrisonerCount - 1 do
+    BuildPrisonerReach(G, I, Reach[I]);
+end;
+
+function CommonGateReachable(const G: TGameState;
+  const Reach: TReachByPrisoner): Boolean;
+var
+  X, Y, I: Byte;
+  AllReach: Boolean;
+begin
+  CommonGateReachable := False;
+  for X := 0 to BoardW - 1 do
+    for Y := 0 to BoardH - 1 do
+      if IsPresent(G.Board[X, Y]) and
+         (G.Board[X, Y].Feature = ftGate) then
+      begin
+        AllReach := True;
+        for I := 0 to PrisonerCount - 1 do
+          if not Reach[I][X, Y] then
+            AllReach := False;
+        if AllReach then
+        begin
+          CommonGateReachable := True;
+          Exit;
+        end;
+      end;
+end;
+
+function ReachableKeyCapacity(const G: TGameState;
+  const Reach: TReachByPrisoner): Byte;
+var
+  X, Y, I, Count: Byte;
+  AnyReach: Boolean;
+begin
+  Count := CountHeldKeys(G);
+  for X := 0 to BoardW - 1 do
+    for Y := 0 to BoardH - 1 do
+      if IsPresent(G.Board[X, Y]) and
+         IsKeyTileFeature(G.Board[X, Y].Feature) then
+      begin
+        AnyReach := False;
+        for I := 0 to PrisonerCount - 1 do
+          if Reach[I][X, Y] then
+            AnyReach := True;
+        if AnyReach then
+          Inc(Count);
+      end;
+  ReachableKeyCapacity := Count;
 end;
 
 function PrisonerOnBreakableTile(const G: TGameState; Index: Byte): Boolean;
@@ -1230,6 +1407,7 @@ var
   TotalKeyCapacity: Byte;
   GateCapacity: Byte;
   AnyAction: Boolean;
+  Reach: TReachByPrisoner;
 begin
   if G.Phase in [gpWin, gpLoss] then
     Exit;
@@ -1255,6 +1433,23 @@ begin
     G.Phase := gpLoss;
     AddLog(G, 'No gate remains to carry all four prisoners out.');
     Exit;
+  end;
+
+  if G.Phase = gpFinal then
+  begin
+    BuildFinalReachability(G, Reach);
+    if ReachableKeyCapacity(G, Reach) < 4 then
+    begin
+      G.Phase := gpLoss;
+      AddLog(G, 'The remaining keys are cut off by darkness.');
+      Exit;
+    end;
+    if not CommonGateReachable(G, Reach) then
+    begin
+      G.Phase := gpLoss;
+      AddLog(G, 'No single gate can still receive every prisoner.');
+      Exit;
+    end;
   end;
 
   AnyAction := False;

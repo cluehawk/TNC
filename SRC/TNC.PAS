@@ -552,6 +552,9 @@ begin
     if G.Phase in [gpWin, gpLoss] then
       Break;
 
+    { Stay-earned Nerve arrives after extra Moves and Final Flickers, so it
+      cannot be spent during the turn in which it was earned. }
+    ApplyPendingNerve(G, Index);
     AdvanceTurn(G);
   until False;
 end;

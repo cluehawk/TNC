@@ -708,6 +708,7 @@ begin
     G.Prisoners[I].Falling := False;
     G.Prisoners[I].Alive := True;
     G.Prisoners[I].Nerve := StartNerve;
+    G.Prisoners[I].NervePending := False;
     G.Prisoners[I].X := 0;
     G.Prisoners[I].Y := 0;
   end;

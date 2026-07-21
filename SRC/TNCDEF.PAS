@@ -51,6 +51,7 @@ type
     Falling: Boolean;
     Alive: Boolean;
     Nerve: Byte;
+    NervePending: Boolean;
   end;
 
   TMessageStr = string[62];

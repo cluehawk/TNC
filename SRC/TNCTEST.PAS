@@ -55,6 +55,23 @@ begin
   G.Board[X, Y].Flags := Flags + [cfPresent];
 end;
 
+procedure PrepareFinalPrisoners(var G: TGameState);
+var
+  I: Byte;
+begin
+  G.Phase := gpFinal;
+  for I := 0 to PrisonerCount - 1 do
+  begin
+    G.Prisoners[I].Alive := True;
+    G.Prisoners[I].Started := True;
+    G.Prisoners[I].Lit := True;
+    G.Prisoners[I].HasKey := True;
+    G.Prisoners[I].Falling := False;
+    G.Prisoners[I].Nerve := 0;
+    G.Prisoners[I].NervePending := False;
+  end;
+end;
+
 procedure TestDrawStack;
 var
   G: TGameState;
@@ -294,8 +311,13 @@ begin
     'lights-out prisoner may spend nerve to stay');
   Check(G.Prisoners[0].Nerve = 0,
     'lights-out stay costs one nerve without gaining it back');
+  Check(not G.Prisoners[0].NervePending,
+    'lights-out stay does not schedule a nerve gain');
   Check(G.DrawsRemaining = 0,
     'lights-out stay still discards one draw tile');
+  ApplyPendingNerve(G, 0);
+  Check(G.Prisoners[0].Nerve = 0,
+    'turn end does not refund a lights-out stay');
 
   ResetState(G);
   G.Phase := gpMaze;
@@ -310,10 +332,29 @@ begin
   G.Prisoners[0].Y := 1;
   PutCell(G, 1, 1, tkCross, 0, ftNone, []);
   Check(StayPrisoner(G, 0), 'lit prisoner may stay normally');
-  Check(G.Prisoners[0].Nerve = 2,
-    'ordinary stay gains one nerve up to the maximum');
+  Check((G.Prisoners[0].Nerve = 1) and G.Prisoners[0].NervePending,
+    'stay-earned nerve is unavailable during the current turn');
   Check(G.DrawsRemaining = 0,
     'ordinary stay discards one draw tile');
+  ApplyPendingNerve(G, 0);
+  Check((G.Prisoners[0].Nerve = 2) and
+        (not G.Prisoners[0].NervePending),
+    'ordinary stay awards nerve only at turn end');
+
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].Nerve := MaxNerve;
+  G.Prisoners[0].X := 1;
+  G.Prisoners[0].Y := 1;
+  PutCell(G, 1, 1, tkCross, 0, ftNone, []);
+  Check(StayPrisoner(G, 0),
+    'full-nerve prisoner may earn a deferred stay nerve');
+  Dec(G.Prisoners[0].Nerve);
+  ApplyPendingNerve(G, 0);
+  Check(G.Prisoners[0].Nerve = MaxNerve,
+    'deferred stay nerve replenishes nerve spent before turn end');
 end;
 
 procedure TestMonsterChainResolution;
@@ -492,10 +533,97 @@ begin
   BuildFlickerTargets(G, Eligible, Count);
   Check((Count = 1) and Eligible[1, 1],
     'final flicker offers each removable illuminated tile');
-  Check(not Eligible[2, 2], 'final flicker protects occupied tiles');
+  Check(not Eligible[2, 2],
+    'final flicker protects occupied tiles while another choice exists');
+  Check(not RemoveFlickerTileAt(G, 2, 2),
+    'occupied flicker target is rejected while another choice exists');
   Check(RemoveFlickerTileAt(G, 1, 1), 'selected final flicker tile is removed');
   Check(not IsPresent(G.Board[1, 1]), 'removed flicker cell becomes empty');
   Check(G.LostGates = 1, 'removed final-flicker gate is counted as lost');
+
+  ResetState(G);
+  PutCell(G, 2, 2, tkCross, 0, ftNone, [cfLit, cfOccupied]);
+  BuildFlickerTargets(G, Eligible, Count);
+  Check((Count = 1) and Eligible[2, 2],
+    'occupied illuminated tile becomes the last-resort flicker target');
+  Check(RemoveFlickerTileAt(G, 2, 2),
+    'last-resort occupied flicker tile is removed');
+  Check((G.Phase = gpLoss) and (not IsPresent(G.Board[2, 2])),
+    'removing a prisoner tile in Final Flickers loses the game');
+end;
+
+procedure TestFinalIsolationLoss;
+var
+  G: TGameState;
+  I, X: Byte;
+begin
+  ResetState(G);
+  PrepareFinalPrisoners(G);
+  for I := 0 to PrisonerCount - 1 do
+  begin
+    G.Prisoners[I].X := I;
+    G.Prisoners[I].Y := 1;
+  end;
+  for X := 0 to 3 do
+    PutCell(G, X, 1, tkStraight, 1, ftNone, []);
+  PutCell(G, 4, 1, tkCross, 0, ftGate, []);
+  RebuildOccupancy(G);
+  CheckWinLoss(G);
+  Check(G.Phase = gpFinal,
+    'connected prisoners remain alive when one common gate is reachable');
+
+  ResetState(G);
+  PrepareFinalPrisoners(G);
+  G.Prisoners[0].X := 0;
+  G.Prisoners[0].Y := 0;
+  for I := 1 to PrisonerCount - 1 do
+  begin
+    G.Prisoners[I].X := 3;
+    G.Prisoners[I].Y := 3;
+  end;
+  PutCell(G, 0, 0, tkCross, 0, ftNone, []);
+  PutCell(G, 3, 3, tkCross, 0, ftGate, []);
+  RebuildOccupancy(G);
+  CheckWinLoss(G);
+  Check(G.Phase = gpLoss,
+    'Final Flickers loses when no gate is reachable by every prisoner');
+
+  ResetState(G);
+  PrepareFinalPrisoners(G);
+  G.Prisoners[0].HasKey := False;
+  for I := 0 to PrisonerCount - 1 do
+  begin
+    G.Prisoners[I].X := I;
+    G.Prisoners[I].Y := 1;
+  end;
+  for X := 0 to 3 do
+    PutCell(G, X, 1, tkStraight, 1, ftNone, []);
+  PutCell(G, 4, 1, tkCross, 0, ftGate, []);
+  PutCell(G, 0, 4, tkCross, 0, ftKey, []);
+  RebuildOccupancy(G);
+  Check(RemainingKeys(G) = 4,
+    'raw key count includes an isolated board key');
+  CheckWinLoss(G);
+  Check(G.Phase = gpLoss,
+    'Final Flickers loses when a required key is unreachable');
+
+  ResetState(G);
+  PrepareFinalPrisoners(G);
+  G.Prisoners[0].X := 0;
+  G.Prisoners[0].Y := 0;
+  for I := 1 to PrisonerCount - 1 do
+  begin
+    G.Prisoners[I].X := 5;
+    G.Prisoners[I].Y := 0;
+  end;
+  PutCell(G, 0, 0, tkStart, 0, ftNone, []);
+  for X := 1 to 4 do
+    PutCell(G, X, 0, tkPit, 0, ftNone, []);
+  PutCell(G, 5, 0, tkCross, 0, ftGate, []);
+  RebuildOccupancy(G);
+  CheckWinLoss(G);
+  Check(G.Phase = gpFinal,
+    'full-row falling route prevents a false isolation loss');
 end;
 
 var
@@ -520,6 +648,7 @@ begin
   TestPassThenClaimStandingKey;
   TestScrambleEntryFeature;
   TestFinalFlickerSelection;
+  TestFinalIsolationLoss;
 
   if Failures = 0 then
   begin

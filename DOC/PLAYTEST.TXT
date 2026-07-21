@@ -25,9 +25,15 @@ Automated baseline: run BUILD\TEST.BAT and confirm all core regression tests pas
    While still lights out, move into an empty space and confirm only that destination is drawn.
    Spend nerve to Stay while lights out and confirm the spent nerve is not regained.
 9. Spend nerve to Move Again and confirm Stay is not offered as the extra action.
-   Stay normally, spend the gained nerve to Move Again, and confirm the turn then ends.
+   Stay with no nerve and confirm the earned nerve is unavailable for Move Again.
+   In Final Flickers, confirm that newly earned nerve cannot Sustain that same turn.
+   Confirm the nerve is added only after the flicker and is available next turn.
 10. Continue until draws reach zero and confirm final flickers begin.
 11. Spend nerve to cancel a final flicker, then skip the spend and select which eligible lit tile is removed.
+    Confirm occupied tiles are protected while an unoccupied lit tile exists.
+    If only occupied lit tiles remain, confirm one is removed and the game is lost.
+    Remove a connecting tile and confirm the game ends if no single Gate remains
+    reachable by all four Prisoners.
 12. Carry a Key across another Key tile and confirm the unclaimed Key remains on the armed tile.
     Pass the held Key while still there and confirm the freed hand claims the tile's Key.
 13. Gather keys and stack all four keyed prisoners on a gate to confirm victory.

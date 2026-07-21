@@ -33,7 +33,13 @@ Implemented Special Rules
 - Nerve can buy extra Moves, allow staying while lights out, brace against wax eaters,
   charge a wax eater, and cancel one final-flicker loss.
 - A lights-out Stay spends one Nerve and does not also earn the normal Stay Nerve.
-- Final Flickers let the player select an illuminated unoccupied tile to lose.
+- Nerve earned by a lit Stay is awarded at the very end of the turn, after extra
+  Moves and Final Flickers, and cannot be spent on the turn it is earned.
+- Final Flickers remove an illuminated unoccupied tile when one is available.
+  If only occupied illuminated tiles remain, one must be removed and the game is lost.
+- During Final Flickers, the game detects Keys cut off by darkness and requires at
+  least one surviving Gate that every Prisoner can still reach. Full-line falling
+  re-entry remains a valid escape route in that reachability check.
 
 Simplifications
 ---------------
