@@ -143,13 +143,19 @@ var
   MX, MY, Victim: Byte;
   VictimMask: Byte;
   Brace: Boolean;
+  Resolved: TBoolGrid;
 begin
+  FillChar(Resolved, SizeOf(Resolved), 0);
   while PopScheduledMonster(Scheduled, MX, MY) do
   begin
+    if Resolved[MX, MY] then
+      Continue;
+    Resolved[MX, MY] := True;
+
     if (not IsPresent(G.Board[MX, MY])) or (G.Board[MX, MY].Feature <> ftMonster) then
       Continue;
 
-    VictimMask := MonsterVictimMaskAndChains(G, MX, MY, Scheduled);
+    VictimMask := MonsterVictimMaskAndChains(G, MX, MY, Scheduled, Resolved);
     if VictimMask <> 0 then
     begin
       for Victim := 0 to PrisonerCount - 1 do
@@ -162,18 +168,6 @@ begin
             Brace := False;
           ApplyMonsterHit(G, Victim, 1, Brace);
         end;
-
-      RebuildOccupancy(G);
-      RecomputeLighting(G);
-      CollapseDarkness(G);
-      RebuildOccupancy(G);
-      ResolveRelights(G);
-      RecomputeLighting(G);
-      RebuildOccupancy(G);
-      CheckPhaseTransitions(G);
-      CheckWinLoss(G);
-      if G.Phase in [gpWin, gpLoss] then
-        Exit;
     end;
   end;
 end;
@@ -226,6 +220,29 @@ begin
   until False;
 end;
 
+function ResolveMonsterEscape(var G: TGameState; Index: Byte;
+  const PromptText: string): Boolean;
+var
+  Scheduled: TBoolGrid;
+begin
+  ResolveMonsterEscape := False;
+  while PrisonerOnMonster(G, Index) do
+  begin
+    if not ResolveMonsterScramble(G, Index, PromptText) then
+      Exit;
+
+    { A forced scramble still enters its destination normally.  If that
+      destination is another wax eater, the new monster attacks before the
+      prisoner can finish escaping. }
+    if PrisonerOnMonster(G, Index) then
+    begin
+      BuildLandingTriggeredMonsters(G, Index, Scheduled);
+      ResolveMonsterHits(G, Scheduled);
+    end;
+  end;
+  ResolveMonsterEscape := True;
+end;
+
 function ResolveLandingMonster(var G: TGameState; Index: Byte): Boolean;
 var
   Scheduled: TBoolGrid;
@@ -236,7 +253,7 @@ begin
   ResolveMonsterHits(G, Scheduled);
 
   if PrisonerOnMonster(G, Index) then
-    if not ResolveMonsterScramble(G, Index, 'Landing hit: choose a scramble direction.') then
+    if not ResolveMonsterEscape(G, Index, 'Landing hit: choose a scramble direction.') then
     begin
       ResolveLandingMonster := False;
       Exit;
@@ -256,8 +273,12 @@ begin
   ResolveFallingLanding := False;
   BuildFallingTargets(G, Index, Dir, EmptyEligible, ExistingEligible, EmptyCount, ExistingCount);
 
-  if (EmptyCount > 0) and (G.DrawsRemaining > 0) then
+  if EmptyCount > 0 then
+  begin
+    if G.DrawsRemaining = 0 then
+      Exit;
     PromptSelectBoardCell(G, EmptyEligible, 'Choose an empty landing space on this line.', SelX, SelY)
+  end
   else if ExistingCount > 0 then
     PromptSelectBoardCell(G, ExistingEligible, 'No empty space: choose an existing landing tile.', SelX, SelY)
   else
@@ -281,44 +302,25 @@ begin
   RefreshBoard := DidMove or G.Prisoners[Index].Falling;
 
   RebuildOccupancy(G);
-  if RefreshBoard then
-  begin
-    ResolveRelights(G);
-    RecomputeLighting(G);
-  end;
-
-  if DidMove then
+  if DidMove or G.Prisoners[Index].Falling then
     BuildMoveTriggeredMonsters(BeforeMoveState, AfterMoveState, Index, OldX, OldY, Scheduled)
   else
     FillChar(Scheduled, SizeOf(Scheduled), 0);
 
+  { Movement triggers the complete wax-eater chain before new passages are
+    illuminated or darkness removes any queued monster. }
   ResolveMonsterHits(G, Scheduled);
-  if RefreshBoard then
-  begin
-    ResolveRelights(G);
-    RebuildOccupancy(G);
-    RecomputeLighting(G);
-  end;
 
   if DidMove and PrisonerOnMonster(G, Index) then
   begin
-    if not ResolveMonsterScramble(G, Index, 'Monster hit: choose a scramble direction.') then
+    if not ResolveMonsterEscape(G, Index, 'Monster hit: choose a scramble direction.') then
       Exit;
-    RebuildOccupancy(G);
-    ResolveRelights(G);
-    RecomputeLighting(G);
   end;
 
   RebuildOccupancy(G);
   if RefreshBoard then
   begin
-    CollapseDarkness(G);
-    RebuildOccupancy(G);
-  end;
-  if (not DidMove) and G.Prisoners[Index].Falling then
-  begin
     ResolveRelights(G);
-    RebuildOccupancy(G);
     RecomputeLighting(G);
     CollapseDarkness(G);
     RebuildOccupancy(G);
@@ -328,7 +330,7 @@ begin
   CheckWinLoss(G);
 end;
 
-function ResolveOneAction(var G: TGameState; Index: Byte): Boolean;
+function ResolveOneAction(var G: TGameState; Index: Byte; MoveOnly: Boolean): Boolean;
 var
   Cmd: Char;
   Dir: TDirection;
@@ -338,7 +340,13 @@ var
   BeforeMoveState, AfterMoveState: TGameState;
 begin
   ResolveOneAction := False;
-  if (not G.Prisoners[Index].Falling) and (not PrisonerHasAnyMove(G, Index)) and
+  if MoveOnly and (G.Prisoners[Index].Falling or (not PrisonerHasAnyMove(G, Index))) then
+  begin
+    AddLog(G, 'No legal extra move remains.');
+    Exit;
+  end;
+  if (not MoveOnly) and (not G.Prisoners[Index].Falling) and
+     (not PrisonerHasAnyMove(G, Index)) and
      ((G.Prisoners[Index].Lit = False) and (G.Prisoners[Index].Nerve = 0)) then
   begin
     G.Phase := gpLoss;
@@ -354,6 +362,11 @@ begin
   AfterMoveState := G;
   repeat
     DrawGame(G);
+    if MoveOnly then
+    begin
+      WriteAt(3, 23, 'Extra move: I/J/K/L or arrows   P pass key   Q quit                 ');
+      WriteAt(3, 24, 'Nerve grants a Move, not another Stay.                              ');
+    end;
     GetAction(G, Cmd, Dir);
     case Cmd of
       'Q':
@@ -361,21 +374,6 @@ begin
           G.Phase := gpLoss;
           AddLog(G, 'The player abandons the labyrinth.');
           Exit;
-        end;
-      'N':
-        begin
-          if G.Prisoners[Index].Falling then
-            AddLog(G, 'No nerve trick helps while falling.')
-          else if G.Prisoners[Index].Nerve = 0 then
-            AddLog(G, 'No nerve remains.')
-          else if G.Prisoners[Index].BonusAction then
-            AddLog(G, 'An extra action is already queued.')
-          else
-          begin
-            Dec(G.Prisoners[Index].Nerve);
-            G.Prisoners[Index].BonusAction := True;
-            AddLog(G, PrisonerName(Index) + ' steels up for one extra action.');
-          end;
         end;
       'P':
         begin
@@ -386,11 +384,14 @@ begin
         end;
       'S':
         begin
-          if G.Prisoners[Index].Falling then
+          if MoveOnly then
+            AddLog(G, 'Nerve grants an extra move, not another stay.')
+          else if G.Prisoners[Index].Falling then
             AddLog(G, 'Choose a re-entry direction instead of staying.')
           else if StayPrisoner(G, Index) then
           begin
             ResolveStayMonsterReplacement(G, Index);
+            AfterMoveState := G;
             Done := True
           end
           else
@@ -405,6 +406,11 @@ begin
               OldX := G.Prisoners[Index].X;
               OldY := G.Prisoners[Index].Y;
               DidMove := False;
+              { The landing, its illumination, and any landing monster have
+                finished.  A subsequent normal move must compare against
+                this board, not the stale pre-fall snapshot. }
+              BeforeMoveState := G;
+              AfterMoveState := G;
               AddLog(G, PrisonerName(Index) + ' may now take the turn normally.');
             end
             else
@@ -452,11 +458,22 @@ end;
 procedure ResolveFinalFlicker(var G: TGameState; Index: Byte);
 var
   CancelLoss: Boolean;
+  Eligible: TBoolGrid;
+  Count: Byte;
+  SelX, SelY: Byte;
 begin
   if G.Phase <> gpFinal then
     Exit;
   if G.Phase in [gpWin, gpLoss] then
     Exit;
+
+  BuildFlickerTargets(G, Eligible, Count);
+  if Count = 0 then
+  begin
+    AddLog(G, 'No unoccupied illuminated tile can be removed this flicker.');
+    CheckWinLoss(G);
+    Exit;
+  end;
 
   CancelLoss := False;
   DrawGame(G);
@@ -469,7 +486,10 @@ begin
     AddLog(G, PrisonerName(Index) + ' spends 1 nerve to preserve the last glow.');
   end
   else
-    RemoveOneFlickerTile(G);
+  begin
+    PromptSelectBoardCell(G, Eligible, 'Final flicker: choose an illuminated tile to lose.', SelX, SelY);
+    RemoveFlickerTileAt(G, SelX, SelY);
+  end;
 
   RebuildOccupancy(G);
   CheckWinLoss(G);
@@ -493,9 +513,6 @@ begin
       AdvanceTurn(G);
       Continue;
     end;
-    if G.Prisoners[Index].BonusAction then
-      G.Prisoners[Index].BonusAction := False;
-
     if G.Prisoners[Index].Falling and (not HasAnyReEntry(G, Index)) then
     begin
       G.Phase := gpLoss;
@@ -503,16 +520,27 @@ begin
       Break;
     end;
 
-    if not ResolveOneAction(G, Index) then
+    if not ResolveOneAction(G, Index, False) then
       Break;
     if G.Phase in [gpWin, gpLoss] then
       Break;
 
-    while G.Prisoners[Index].BonusAction do
+    while (G.Prisoners[Index].Nerve > 0) and
+          (not G.Prisoners[Index].Falling) and
+          PrisonerHasAnyMove(G, Index) do
     begin
-      G.Prisoners[Index].BonusAction := False;
-      AddLog(G, PrisonerName(Index) + ' takes the extra action granted by nerve.');
-      if not ResolveOneAction(G, Index) then
+      DrawGame(G);
+      if not PromptYesNo('Spend 1 nerve to move again?') then
+        Break;
+      Dec(G.Prisoners[Index].Nerve);
+      if not PrisonerHasAnyMove(G, Index) then
+      begin
+        Inc(G.Prisoners[Index].Nerve);
+        AddLog(G, 'No legal move remains after reserving charge nerve.');
+        Break;
+      end;
+      AddLog(G, PrisonerName(Index) + ' spends 1 nerve to move again.');
+      if not ResolveOneAction(G, Index, True) then
         Break;
       if G.Phase in [gpWin, gpLoss] then
         Break;

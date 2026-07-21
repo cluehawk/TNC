@@ -9,26 +9,35 @@ Prototype Scope
 ---------------
 - 80x25 text mode only.
 - Single player controls all four prisoners.
-- Toroidal 18x12 maze board.
+- Toroidal 6x6 maze board.
 - Lit tiles remain. Unlit unoccupied tiles vanish.
 - New tiles appear only when candlelight reaches empty connected space.
+- If several candles reveal the same empty space, its tile must connect to every
+  revealing passage and consumes only one draw.
 - Finite draw stack. When exhausted, final flickers begin.
 
 Implemented Special Rules
 -------------------------
 - Key tiles grant one key automatically.
+- An already-keyed prisoner leaves a newly entered Key on its armed crumbling tile.
 - Gate tile wins only when all four keyed prisoners stand on the same gate.
 - Crumbling tiles arm on entry, drop to pits when left, and cause falling if stayed on.
 - Falling prisoners re-enter on their next turn from a chosen edge along the same row or column.
 - Wax eater attacks trace along straight connected passages and wrap across edges.
+- Each wax eater resolves once per trigger cascade; connected monsters chain without cycling.
+- Forced scrambles resolve the destination tile normally and continue if it is another wax eater.
 - Lights-out prisoners cannot reveal new tiles.
 - Adjacency or sharing a tile with a lit prisoner relights a lights-out prisoner.
-- Nerve can queue extra actions, allow staying while lights out, brace against wax eaters,
-  and cancel one final-flicker loss.
+- Relighting is resolved before illumination, so the restored candle immediately
+  reveals its complete radius. Connected groups relay the flame as one event.
+- Nerve can buy extra Moves, allow staying while lights out, brace against wax eaters,
+  charge a wax eater, and cancel one final-flicker loss.
+- A lights-out Stay spends one Nerve and does not also earn the normal Stay Nerve.
+- Final Flickers let the player select an illuminated unoccupied tile to lose.
 
 Simplifications
 ---------------
-- Tile bag is weighted, not an exact tabletop tile inventory.
-- Monster chains are represented by counting all visible monsters along connected straight rays.
-- Final flickers remove one lit non-permanent non-occupied tile per turn.
-- Multiple prisoners may stack on one tile.
+- The core solo draw stack uses the exact 76-tile inventory after removing two Keys.
+- Only the four-prisoner solo/core rules are implemented.
+- Advanced monster types are not implemented.
+- Gate tiles are the only tiles that allow multiple prisoners.

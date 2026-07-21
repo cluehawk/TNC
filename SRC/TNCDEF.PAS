@@ -23,7 +23,8 @@ type
   TDirection = (dirNorth, dirEast, dirSouth, dirWest);
 
   TTileKind = (tkVoid, tkStart, tkStraight, tkCorner, tkTJunction, tkCross, tkPit);
-  TFeature  = (ftNone, ftKey, ftGate, ftCrumbleFresh, ftCrumbleArmed, ftMonster);
+  TFeature  = (ftNone, ftKey, ftKeyArmed, ftGate,
+               ftCrumbleFresh, ftCrumbleArmed, ftMonster);
   TCellFlag = (cfPresent, cfPermanent, cfLit, cfOccupied, cfFresh);
   TCellFlags = set of TCellFlag;
   TGamePhase = (gpMaze, gpFinal, gpWin, gpLoss);
@@ -49,13 +50,12 @@ type
     HasKey: Boolean;
     Falling: Boolean;
     Alive: Boolean;
-    BonusAction: Boolean;
     Nerve: Byte;
   end;
 
   TMessageStr = string[62];
   TBoolGrid = array[0..BoardW - 1, 0..BoardH - 1] of Boolean;
-  TDirGrid = array[0..BoardW - 1, 0..BoardH - 1] of TDirection;
+  TMaskGrid = array[0..BoardW - 1, 0..BoardH - 1] of Byte;
   TPrisonerHitCounts = array[0..PrisonerCount - 1] of Byte;
 
   TGameState = record
@@ -82,7 +82,6 @@ type
     LogHead: Byte;
     LogCount: Byte;
     Messages: array[0..MaxLogLines - 1] of TMessageStr;
-    FlickerCursor: Word;
   end;
 
 const

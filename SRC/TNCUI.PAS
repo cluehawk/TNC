@@ -116,7 +116,7 @@ begin
   end;
 
   case G.Board[X, Y].Feature of
-    ftKey: OverlayGlyph := 'K';
+    ftKey, ftKeyArmed: OverlayGlyph := 'K';
     ftGate: OverlayGlyph := 'G';
     ftCrumbleFresh, ftCrumbleArmed: OverlayGlyph := '*';
     ftMonster: OverlayGlyph := 'W';
@@ -372,7 +372,7 @@ begin
       WarnText := 'WARNING: stepping onto W while lit spends 1 nerve to charge.';
   end;
 
-  HelpText := '   N extra action  TAB view  Q quit';
+  HelpText := '   TAB view  Q quit';
   if G.Prisoners[G.ActiveIndex].Started and (not G.Prisoners[G.ActiveIndex].Falling) then
   begin
     if CanPassKey(G, G.ActiveIndex) then
@@ -422,8 +422,9 @@ begin
   WriteAt(12, 13, '         W wax eater  * crumble  O pit  blank = darkness');
   WriteAt(12, 15, 'I up  J left  K down  L right  P pass key  S stay');
   WriteAt(12, 16, 'Lights out: must move, or spend 1 nerve to stay');
-  WriteAt(12, 17, 'Q quits to DOS');
-  WriteAt(12, 19, 'Press any key to begin.');
+  WriteAt(12, 17, 'After acting, spend nerve when prompted to Move Again');
+  WriteAt(12, 18, 'Q quits to DOS');
+  WriteAt(12, 20, 'Press any key to begin.');
   ReadKey;
 end;
 
@@ -457,7 +458,6 @@ begin
         case Ch of
           'Q': begin Cmd := 'Q'; Exit; end;
           'S': begin Cmd := 'S'; Exit; end;
-          'N': begin Cmd := 'N'; Exit; end;
           'P': begin Cmd := 'P'; Exit; end;
           'I': begin Cmd := 'M'; Dir := dirNorth; Exit; end;
           'L': begin Cmd := 'M'; Dir := dirEast; Exit; end;
@@ -491,12 +491,11 @@ begin
   Found := False;
   for Y := 0 to BoardH - 1 do
     for X := 0 to BoardW - 1 do
-      if Eligible[X, Y] then
+      if (not Found) and Eligible[X, Y] then
       begin
         SelX := X;
         SelY := Y;
         Found := True;
-        Break;
       end;
 
   if not Found then

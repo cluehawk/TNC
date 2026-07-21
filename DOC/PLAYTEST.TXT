@@ -1,15 +1,33 @@
 MANUAL PLAYTEST CHECKLIST
 =========================
 
-1. Start the program and confirm the 2x2 hub appears near the center.
-2. Move each prisoner one step and confirm new connected tiles generate.
+Automated baseline: run BUILD\TEST.BAT and confirm all core regression tests pass.
+
+1. Start the program and place each prisoner's Start tile in any empty board space.
+2. Complete all four opening turns and confirm connected opening tiles generate.
 3. Leave an area behind and confirm unlit unoccupied tiles vanish.
+   Confirm a disconnected adjacent tile remains when it visibly blocks an open passage.
+   Aim two candles into one empty space and confirm the placed tile connects to both.
 4. Find or force a crumbling tile. Enter it, then move away and confirm it becomes a pit.
 5. Stay on an armed crumbling tile and confirm the prisoner begins falling.
 6. On the falling prisoner's next turn, try a valid and an invalid re-entry edge.
+   With an exhausted stack and an empty landing space, confirm re-entry is impossible.
+   When the selected row/column is full, confirm an existing tile can be selected.
 7. Move into line of sight of a monster and confirm lights-out plus draw loss.
+   Connect two wax eaters, trigger one, and confirm each attacks only once.
+   Confirm the full chain resolves before darkness removes extinguished tiles.
+   Scramble onto a Key or crumble tile and confirm its entry effect resolves.
+   Scramble onto another wax eater and confirm the second attack resolves before another scramble.
+   Draw a wax eater while Staying and confirm it replaces the target with a 4-way monster tile.
 8. Move a lit prisoner adjacent to a lights-out prisoner and confirm relight.
-9. Spend nerve for an extra action and confirm the same prisoner acts again.
+   Repeat by moving the lights-out prisoner beside the lit prisoner.
+   Confirm the newly relit candle immediately reveals its complete radius.
+   While still lights out, move into an empty space and confirm only that destination is drawn.
+   Spend nerve to Stay while lights out and confirm the spent nerve is not regained.
+9. Spend nerve to Move Again and confirm Stay is not offered as the extra action.
+   Stay normally, spend the gained nerve to Move Again, and confirm the turn then ends.
 10. Continue until draws reach zero and confirm final flickers begin.
-11. Spend nerve to cancel a final flicker, then skip the spend and confirm a lit tile is removed.
-12. Gather keys and stack all four keyed prisoners on a gate to confirm victory.
+11. Spend nerve to cancel a final flicker, then skip the spend and select which eligible lit tile is removed.
+12. Carry a Key across another Key tile and confirm the unclaimed Key remains on the armed tile.
+    Pass the held Key while still there and confirm the freed hand claims the tile's Key.
+13. Gather keys and stack all four keyed prisoners on a gate to confirm victory.

@@ -11,11 +11,10 @@ procedure InitGame(var G: TGameState);
 function CanGenerateCell(const G: TGameState; X, Y: Byte; RequiredDir: TDirection): Boolean;
 function GenerateCell(var G: TGameState; X, Y: Byte; RequiredDir: TDirection): Boolean;
 function PlaceIlluminationTile(var G: TGameState; const Eligible: TBoolGrid;
-  const RequiredDirs: TDirGrid): Boolean;
+  const RequiredMasks: TMaskGrid): Boolean;
 function ChooseStartRotation(var G: TGameState; X, Y: Byte): Byte;
 procedure PlaceStartCell(var G: TGameState; X, Y, Rot: Byte);
 function PlaceFreeTileAt(var G: TGameState; X, Y: Byte): Boolean;
-function PlaceFreeTileAtAuto(var G: TGameState; X, Y: Byte): Boolean;
 procedure DiscardDrawTiles(var G: TGameState; Count: Byte);
 function DrawTopTile(var G: TGameState; var Tile: TDrawTile; Lost: Boolean): Boolean;
 
@@ -57,7 +56,7 @@ end;
 procedure AddFeatureCounter(var G: TGameState; Feature: TFeature);
 begin
   case Feature of
-    ftKey: Inc(G.FeatureKeys);
+    ftKey, ftKeyArmed: Inc(G.FeatureKeys);
     ftGate: Inc(G.FeatureGates);
     ftCrumbleFresh, ftCrumbleArmed: Inc(G.FeatureCrumbles);
     ftMonster: Inc(G.FeatureMonsters);
@@ -67,7 +66,7 @@ end;
 procedure RemoveFeatureCounter(var G: TGameState; Feature: TFeature; Lost: Boolean);
 begin
   case Feature of
-    ftKey:
+    ftKey, ftKeyArmed:
       begin
         if G.FeatureKeys > 0 then
           Dec(G.FeatureKeys);
@@ -232,6 +231,16 @@ begin
   CandidateLegal := CellWouldLegalOpen(G, X, Y, OpenMask(Kind, Rot), RequiredDir);
 end;
 
+function CandidateLegalMask(const G: TGameState; X, Y: Byte; Kind: TTileKind;
+  Rot, RequiredMask: Byte): Boolean;
+var
+  Mask: Byte;
+begin
+  Mask := OpenMask(Kind, Rot);
+  CandidateLegalMask := (RequiredMask <> 0) and
+                        ((Mask and RequiredMask) = RequiredMask);
+end;
+
 function MaxRotationForKind(Kind: TTileKind): Byte;
 begin
   case Kind of
@@ -258,10 +267,26 @@ begin
     end;
 end;
 
+function DrawTileFitsMask(const G: TGameState; X, Y: Byte; const Tile: TDrawTile;
+  RequiredMask: Byte; var Rot: Byte): Boolean;
+var
+  R, MaxRot: Byte;
+begin
+  DrawTileFitsMask := False;
+  MaxRot := MaxRotationForKind(Tile.Kind);
+  for R := 0 to MaxRot do
+    if CandidateLegalMask(G, X, Y, Tile.Kind, R, RequiredMask) then
+    begin
+      Rot := R;
+      DrawTileFitsMask := True;
+      Exit;
+    end;
+end;
+
 function TileFeatureName(Feature: TFeature): string;
 begin
   case Feature of
-    ftKey: TileFeatureName := 'key';
+    ftKey, ftKeyArmed: TileFeatureName := 'key';
     ftGate: TileFeatureName := 'gate';
     ftCrumbleFresh, ftCrumbleArmed: TileFeatureName := 'crumble';
     ftMonster: TileFeatureName := 'wax eater';
@@ -303,7 +328,7 @@ end;
 function PreviewFeatureGlyph(Kind: TTileKind; Feature: TFeature): Char;
 begin
   case Feature of
-    ftKey: PreviewFeatureGlyph := 'K';
+    ftKey, ftKeyArmed: PreviewFeatureGlyph := 'K';
     ftGate: PreviewFeatureGlyph := 'G';
     ftCrumbleFresh, ftCrumbleArmed: PreviewFeatureGlyph := '*';
     ftMonster: PreviewFeatureGlyph := 'W';
@@ -386,7 +411,8 @@ begin
   ChooseRotation := Rot;
 end;
 
-function ChooseFreeRotation(var G: TGameState; X, Y: Byte; const Tile: TDrawTile): Byte;
+function ChooseFreeRotation(var G: TGameState; X, Y: Byte; const Tile: TDrawTile;
+  const TileLabel: string): Byte;
 var
   Rot, MaxRot: Byte;
   Ch: Char;
@@ -403,7 +429,7 @@ begin
     DrawPreviewTile(X, Y, Tile, Rot);
     ClearPromptLines;
     GotoXY(3, 23);
-    Write('Landing tile: ', TileKindName(Tile.Kind), ' ', TileFeatureName(Tile.Feature), '.');
+    Write(TileLabel, ': ', TileKindName(Tile.Kind), ' ', TileFeatureName(Tile.Feature), '.');
     GotoXY(3, 24);
     if MaxRot = 0 then
       Write('ENTER place   Open: ', RotationMaskText(Tile.Kind, Rot))
@@ -431,7 +457,7 @@ var
 begin
   Tile.Kind := tkStart;
   Tile.Feature := ftNone;
-  ChooseStartRotation := ChooseFreeRotation(G, X, Y, Tile);
+  ChooseStartRotation := ChooseFreeRotation(G, X, Y, Tile, 'Start tile');
 end;
 
 function DrawTopTile(var G: TGameState; var Tile: TDrawTile; Lost: Boolean): Boolean;
@@ -447,7 +473,7 @@ begin
 end;
 
 function PlaceIlluminationTile(var G: TGameState; const Eligible: TBoolGrid;
-  const RequiredDirs: TDirGrid): Boolean;
+  const RequiredMasks: TMaskGrid): Boolean;
 var
   Tile: TDrawTile;
   Legal: TBoolGrid;
@@ -470,7 +496,8 @@ begin
 
     for Y := 0 to BoardH - 1 do
       for X := 0 to BoardW - 1 do
-        if Eligible[X, Y] and DrawTileFits(G, X, Y, Tile, RequiredDirs[X, Y], TrialRot) then
+        if Eligible[X, Y] and
+           DrawTileFitsMask(G, X, Y, Tile, RequiredMasks[X, Y], TrialRot) then
         begin
           Legal[X, Y] := True;
           Inc(Count);
@@ -520,13 +547,14 @@ begin
               end;
             until Legal[SelX, SelY];
             ClearPreviewTile(OldX, OldY);
-            DrawTileFits(G, SelX, SelY, Tile, RequiredDirs[SelX, SelY], Rot);
+            DrawTileFitsMask(G, SelX, SelY, Tile, RequiredMasks[SelX, SelY], Rot);
           end
           else if Ch = 'R' then
           begin
             repeat
               Rot := (Rot + 1) mod (MaxRotationForKind(Tile.Kind) + 1);
-            until CandidateLegal(G, SelX, SelY, Tile.Kind, Rot, RequiredDirs[SelX, SelY]);
+            until CandidateLegalMask(G, SelX, SelY, Tile.Kind, Rot,
+                                     RequiredMasks[SelX, SelY]);
           end;
         end;
       until (Ch = #13) or (Ch = ' ');
@@ -561,7 +589,7 @@ begin
   if not DrawTopTile(G, Tile, False) then
     Exit;
 
-  Rot := ChooseFreeRotation(G, X, Y, Tile);
+  Rot := ChooseFreeRotation(G, X, Y, Tile, 'Landing tile');
   ClearCell(G.Board[X, Y]);
   G.Board[X, Y].Kind := Tile.Kind;
   G.Board[X, Y].Rot := Rot;
@@ -569,27 +597,6 @@ begin
   G.Board[X, Y].Flags := [cfPresent, cfFresh];
   G.Board[X, Y].LastLitTurn := 0;
   PlaceFreeTileAt := True;
-end;
-
-function PlaceFreeTileAtAuto(var G: TGameState; X, Y: Byte): Boolean;
-var
-  Tile: TDrawTile;
-begin
-  PlaceFreeTileAtAuto := False;
-  if (G.Phase <> gpMaze) or (G.DrawsRemaining = 0) then
-    Exit;
-  if IsPresent(G.Board[X, Y]) then
-    Exit;
-  if not DrawTopTile(G, Tile, False) then
-    Exit;
-
-  ClearCell(G.Board[X, Y]);
-  G.Board[X, Y].Kind := Tile.Kind;
-  G.Board[X, Y].Rot := 0;
-  G.Board[X, Y].Feature := Tile.Feature;
-  G.Board[X, Y].Flags := [cfPresent, cfFresh];
-  G.Board[X, Y].LastLitTurn := 0;
-  PlaceFreeTileAtAuto := True;
 end;
 
 procedure DiscardDrawTiles(var G: TGameState; Count: Byte);
@@ -691,7 +698,6 @@ begin
   G.PromptPlacement := False;
   G.LostKeys := 0;
   G.LostGates := 0;
-  G.FlickerCursor := 0;
   BuildDrawStack(G);
 
   for I := 0 to PrisonerCount - 1 do
@@ -701,7 +707,6 @@ begin
     G.Prisoners[I].HasKey := False;
     G.Prisoners[I].Falling := False;
     G.Prisoners[I].Alive := True;
-    G.Prisoners[I].BonusAction := False;
     G.Prisoners[I].Nerve := StartNerve;
     G.Prisoners[I].X := 0;
     G.Prisoners[I].Y := 0;

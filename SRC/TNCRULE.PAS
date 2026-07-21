@@ -28,7 +28,8 @@ function ScrambleLandingPrisoner(var G: TGameState; Index: Byte; Dir: TDirection
 procedure BuildMoveTriggeredMonsters(const BeforeG, AfterG: TGameState; ActiveIndex, OldX, OldY: Byte;
   var Scheduled: TBoolGrid);
 procedure BuildLandingTriggeredMonsters(const G: TGameState; Index: Byte; var Scheduled: TBoolGrid);
-function MonsterVictimMaskAndChains(const G: TGameState; MX, MY: Byte; var Scheduled: TBoolGrid): Byte;
+function MonsterVictimMaskAndChains(const G: TGameState; MX, MY: Byte;
+  var Scheduled: TBoolGrid; const Resolved: TBoolGrid): Byte;
 function PrisonerOnMonster(const G: TGameState; Index: Byte): Boolean;
 procedure BuildStayMonsterTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
   var Count: Byte);
@@ -36,7 +37,8 @@ procedure PlacePendingStayMonster(var G: TGameState; X, Y: Byte);
 procedure ApplyMonsterHit(var G: TGameState; Index: Byte; Count: Byte; Brace: Boolean);
 procedure ClearFreshTiles(var G: TGameState);
 procedure CollapseDarkness(var G: TGameState);
-function RemoveOneFlickerTile(var G: TGameState): Boolean;
+procedure BuildFlickerTargets(const G: TGameState; var Eligible: TBoolGrid; var Count: Byte);
+function RemoveFlickerTileAt(var G: TGameState; X, Y: Byte): Boolean;
 procedure CheckPhaseTransitions(var G: TGameState);
 procedure CheckWinLoss(var G: TGameState);
 function PrisonerCanAct(const G: TGameState; Index: Byte): Boolean;
@@ -100,15 +102,22 @@ end;
 procedure ResolveRelights(var G: TGameState);
 var
   I: Byte;
+  Changed: Boolean;
 begin
-  for I := 0 to PrisonerCount - 1 do
-    if G.Prisoners[I].Alive and G.Prisoners[I].Started and
-       (not G.Prisoners[I].Falling) and (not G.Prisoners[I].Lit) then
-      if AdjacentLitAlly(G, I) then
-      begin
-        G.Prisoners[I].Lit := True;
-        AddLog(G, PrisonerName(I) + ' is relit by a nearby flame.');
-      end;
+  { Repeat so a newly relit candle can relay the flame through a connected
+    group regardless of prisoner index order. }
+  repeat
+    Changed := False;
+    for I := 0 to PrisonerCount - 1 do
+      if G.Prisoners[I].Alive and G.Prisoners[I].Started and
+         (not G.Prisoners[I].Falling) and (not G.Prisoners[I].Lit) then
+        if AdjacentLitAlly(G, I) then
+        begin
+          G.Prisoners[I].Lit := True;
+          Changed := True;
+          AddLog(G, PrisonerName(I) + ' is relit by a nearby flame.');
+        end;
+  until not Changed;
 end;
 
 procedure RecomputeLighting(var G: TGameState);
@@ -117,7 +126,7 @@ var
   D: TDirection;
   NX, NY: Byte;
   Eligible: TBoolGrid;
-  RequiredDirs: TDirGrid;
+  RequiredMasks: TMaskGrid;
   Count: Byte;
 begin
   repeat
@@ -126,6 +135,7 @@ begin
         G.Board[X, Y].Flags := G.Board[X, Y].Flags - [cfLit];
 
     FillChar(Eligible, SizeOf(Eligible), 0);
+    FillChar(RequiredMasks, SizeOf(RequiredMasks), 0);
     Count := 0;
 
     for I := 0 to PrisonerCount - 1 do
@@ -148,14 +158,15 @@ begin
               if not Eligible[NX, NY] then
               begin
                 Eligible[NX, NY] := True;
-                RequiredDirs[NX, NY] := OppositeDir(D);
                 Inc(Count);
               end;
+              RequiredMasks[NX, NY] := RequiredMasks[NX, NY] or
+                                        DirMask(OppositeDir(D));
             end;
-            if IsPresent(G.Board[NX, NY]) and
-               (((G.Board[NX, NY].Kind = tkPit)) or
-                (CellOpen(G.Board[X, Y], D) and
-                 CellOpen(G.Board[NX, NY], OppositeDir(D)))) then
+            { A passage illuminates the adjacent tile even when that tile's
+              wall blocks the connection.  The visible wall remains on the
+              board instead of disappearing into darkness. }
+            if CellOpen(G.Board[X, Y], D) and IsPresent(G.Board[NX, NY]) then
             begin
               G.Board[NX, NY].Flags := G.Board[NX, NY].Flags + [cfLit];
               G.Board[NX, NY].LastLitTurn := G.TurnNumber;
@@ -166,21 +177,32 @@ begin
 
     if (Count = 0) or (G.Phase <> gpMaze) or (G.DrawsRemaining = 0) then
       Break;
-  until not PlaceIlluminationTile(G, Eligible, RequiredDirs);
+  until not PlaceIlluminationTile(G, Eligible, RequiredMasks);
 end;
 
-procedure ConvertToPit(var Cell: TCell);
+function IsKeyTileFeature(Feature: TFeature): Boolean;
 begin
-  Cell.Kind := tkPit;
-  Cell.Rot := 0;
-  Cell.Feature := ftNone;
-  Cell.Flags := Cell.Flags + [cfPresent];
+  IsKeyTileFeature := Feature in [ftKey, ftKeyArmed];
+end;
+
+procedure ConvertToPit(var G: TGameState; X, Y: Byte);
+begin
+  if IsKeyTileFeature(G.Board[X, Y].Feature) then
+  begin
+    Inc(G.LostKeys);
+    AddLog(G, 'An unclaimed key falls into the pit.');
+  end;
+  G.Board[X, Y].Kind := tkPit;
+  G.Board[X, Y].Rot := 0;
+  G.Board[X, Y].Feature := ftNone;
+  G.Board[X, Y].Flags := G.Board[X, Y].Flags + [cfPresent];
 end;
 
 function TileBreaksOnUse(const Cell: TCell): Boolean;
 begin
   TileBreaksOnUse := (Cell.Kind = tkStart) or
-                     (Cell.Feature in [ftKey, ftCrumbleFresh, ftCrumbleArmed]);
+                     (Cell.Feature in [ftKey, ftKeyArmed,
+                                       ftCrumbleFresh, ftCrumbleArmed]);
 end;
 
 function IsPitCell(const Cell: TCell): Boolean;
@@ -203,15 +225,20 @@ begin
   Y := G.Prisoners[Index].Y;
 
   case G.Board[X, Y].Feature of
-    ftKey:
+    ftKey, ftKeyArmed:
       begin
         if not G.Prisoners[Index].HasKey then
         begin
           G.Prisoners[Index].HasKey := True;
           AddLog(G, PrisonerName(Index) + ' claims a key tile.');
+          G.Board[X, Y].Feature := ftCrumbleArmed;
+          AddLog(G, 'The key tile begins to crack.');
+        end
+        else if G.Board[X, Y].Feature = ftKey then
+        begin
+          G.Board[X, Y].Feature := ftKeyArmed;
+          AddLog(G, 'The unclaimed key remains as its tile begins to crack.');
         end;
-        G.Board[X, Y].Feature := ftCrumbleArmed;
-        AddLog(G, 'The key tile begins to crack.');
       end;
     ftCrumbleFresh:
       begin
@@ -308,7 +335,7 @@ begin
 
   if TileBreaksOnUse(G.Board[X, Y]) then
   begin
-    ConvertToPit(G.Board[X, Y]);
+    ConvertToPit(G, X, Y);
     AddLog(G, 'The floor behind a prisoner drops away into a pit.');
   end;
 
@@ -393,7 +420,7 @@ begin
 
   if TileBreaksOnUse(G.Board[X, Y]) then
   begin
-    ConvertToPit(G.Board[X, Y]);
+    ConvertToPit(G, X, Y);
     G.Prisoners[Index].Falling := True;
     AddLog(G, PrisonerName(Index) + ' falls as the tile gives way.');
   end;
@@ -455,9 +482,17 @@ end;
 function PassKeyToCell(var G: TGameState; Index, X, Y: Byte): Boolean;
 var
   I: Byte;
+  Eligible: TBoolGrid;
+  Count: Byte;
 begin
   PassKeyToCell := False;
   if not G.Prisoners[Index].HasKey then
+    Exit;
+  if (X >= BoardW) or (Y >= BoardH) then
+    Exit;
+
+  BuildKeyPassTargets(G, Index, Eligible, Count);
+  if (Count = 0) or (not Eligible[X, Y]) then
     Exit;
 
   for I := 0 to PrisonerCount - 1 do
@@ -469,6 +504,9 @@ begin
       G.Prisoners[Index].HasKey := False;
       G.Prisoners[I].HasKey := True;
       AddLog(G, PrisonerName(Index) + ' passes a key to ' + PrisonerName(I) + '.');
+      { Taking a key is free.  If the giver is standing on another Key tile,
+        the newly freed hand claims that key immediately. }
+      HandleEntryFeature(G, Index);
       PassKeyToCell := True;
       Exit;
     end;
@@ -577,7 +615,8 @@ begin
   for Dir := dirNorth to dirWest do
   begin
     BuildFallingTargets(G, Index, Dir, EmptyEligible, ExistingEligible, EmptyCount, ExistingCount);
-    if ((EmptyCount > 0) and (G.DrawsRemaining > 0)) or (ExistingCount > 0) then
+    if ((EmptyCount > 0) and (G.DrawsRemaining > 0)) or
+       ((EmptyCount = 0) and (ExistingCount > 0)) then
     begin
       HasAnyReEntry := True;
       Exit;
@@ -591,7 +630,8 @@ var
   EmptyCount, ExistingCount: Byte;
 begin
   BuildFallingTargets(G, Index, Dir, EmptyEligible, ExistingEligible, EmptyCount, ExistingCount);
-  CanReEnterDirection := ((EmptyCount > 0) and (G.DrawsRemaining > 0)) or (ExistingCount > 0);
+  CanReEnterDirection := ((EmptyCount > 0) and (G.DrawsRemaining > 0)) or
+                         ((EmptyCount = 0) and (ExistingCount > 0));
 end;
 
 function LandFallingPrisoner(var G: TGameState; Index, X, Y: Byte): Boolean;
@@ -614,6 +654,7 @@ begin
   G.Prisoners[Index].Y := Y;
   G.Prisoners[Index].Falling := False;
   AddLog(G, PrisonerName(Index) + ' lands back in the maze.');
+  HandleEntryFeature(G, Index);
   if IsPresent(G.Board[X, Y]) and (G.Board[X, Y].Feature = ftMonster) then
   begin
     G.PendingLandingMonster := True;
@@ -631,8 +672,10 @@ var
 begin
   ResolveFallingEntry := False;
   BuildFallingTargets(G, Index, Dir, EmptyEligible, ExistingEligible, EmptyCount, ExistingCount);
-  if (EmptyCount > 0) and (G.DrawsRemaining > 0) then
+  if EmptyCount > 0 then
   begin
+    if G.DrawsRemaining = 0 then
+      Exit;
     for Y := 0 to BoardH - 1 do
       for X := 0 to BoardW - 1 do
         if EmptyEligible[X, Y] then
@@ -641,7 +684,7 @@ begin
           Exit;
         end;
   end
-  else
+  else if ExistingCount > 0 then
     for Y := 0 to BoardH - 1 do
       for X := 0 to BoardW - 1 do
         if ExistingEligible[X, Y] then
@@ -688,12 +731,13 @@ begin
   NX := WrapX(Integer(X) + DirX[Dir]);
   NY := WrapY(Integer(Y) + DirY[Dir]);
   if not IsPresent(G.Board[NX, NY]) then
-    if not PlaceFreeTileAtAuto(G, NX, NY) then
+    if not PlaceFreeTileAt(G, NX, NY) then
       Exit;
 
   G.Prisoners[Index].X := NX;
   G.Prisoners[Index].Y := NY;
   AddLog(G, PrisonerName(Index) + ' scrambles ' + DirName(Dir) + ' from the monster.');
+  HandleEntryFeature(G, Index);
   ScrambleLandingPrisoner := True;
 end;
 
@@ -788,7 +832,8 @@ begin
     end;
 end;
 
-function MonsterVictimMaskAndChains(const G: TGameState; MX, MY: Byte; var Scheduled: TBoolGrid): Byte;
+function MonsterVictimMaskAndChains(const G: TGameState; MX, MY: Byte;
+  var Scheduled: TBoolGrid; const Resolved: TBoolGrid): Byte;
 var
   D: TDirection;
   CX, CY, NX, NY, Limit, Step: Byte;
@@ -823,7 +868,7 @@ begin
       CX := NX;
       CY := NY;
       MarkPrisonersAtCell(G, CX, CY, Seen, Mask);
-      if G.Board[CX, CY].Feature = ftMonster then
+      if (G.Board[CX, CY].Feature = ftMonster) and (not Resolved[CX, CY]) then
         Scheduled[CX, CY] := True;
     end;
   end;
@@ -930,10 +975,12 @@ begin
     Exit;
   end;
 
-  if G.Board[X, Y].Feature = ftKey then
+  if IsKeyTileFeature(G.Board[X, Y].Feature) then
     Inc(G.LostKeys);
   if G.Board[X, Y].Feature = ftGate then
     Inc(G.LostGates);
+  G.Board[X, Y].Kind := tkCross;
+  G.Board[X, Y].Rot := 0;
   G.Board[X, Y].Feature := ftMonster;
   G.Board[X, Y].Flags := G.Board[X, Y].Flags + [cfFresh];
   G.PendingStayMonster := False;
@@ -982,7 +1029,7 @@ begin
          not (cfLit in G.Board[X, Y].Flags) and
          not (cfOccupied in G.Board[X, Y].Flags) then
       begin
-        if G.Board[X, Y].Feature = ftKey then
+        if IsKeyTileFeature(G.Board[X, Y].Feature) then
           Inc(G.LostKeys);
         if G.Board[X, Y].Feature = ftGate then
           Inc(G.LostGates);
@@ -990,32 +1037,42 @@ begin
       end;
 end;
 
-function RemoveOneFlickerTile(var G: TGameState): Boolean;
+procedure BuildFlickerTargets(const G: TGameState; var Eligible: TBoolGrid; var Count: Byte);
 var
-  Scan, Index, X, Y: Word;
+  X, Y: Byte;
 begin
-  RemoveOneFlickerTile := False;
-  for Scan := 0 to (BoardW * BoardH) - 1 do
-  begin
-    Index := (G.FlickerCursor + Scan) mod (BoardW * BoardH);
-    X := Index mod BoardW;
-    Y := Index div BoardW;
+  FillChar(Eligible, SizeOf(Eligible), 0);
+  Count := 0;
+  for X := 0 to BoardW - 1 do
+    for Y := 0 to BoardH - 1 do
     if IsPresent(G.Board[X, Y]) and
        (cfLit in G.Board[X, Y].Flags) and
        not (cfPermanent in G.Board[X, Y].Flags) and
        not (cfOccupied in G.Board[X, Y].Flags) then
     begin
-      if G.Board[X, Y].Feature = ftKey then
-        Inc(G.LostKeys);
-      if G.Board[X, Y].Feature = ftGate then
-        Inc(G.LostGates);
-      ClearCell(G.Board[X, Y]);
-      G.FlickerCursor := (Index + 1) mod (BoardW * BoardH);
-      AddLog(G, 'A final flicker is swallowed by darkness.');
-      RemoveOneFlickerTile := True;
-      Exit;
+      Eligible[X, Y] := True;
+      Inc(Count);
     end;
-  end;
+end;
+
+function RemoveFlickerTileAt(var G: TGameState; X, Y: Byte): Boolean;
+begin
+  RemoveFlickerTileAt := False;
+  if (X >= BoardW) or (Y >= BoardH) then
+    Exit;
+  if (not IsPresent(G.Board[X, Y])) or
+     (not (cfLit in G.Board[X, Y].Flags)) or
+     (cfPermanent in G.Board[X, Y].Flags) or
+     (cfOccupied in G.Board[X, Y].Flags) then
+    Exit;
+
+  if IsKeyTileFeature(G.Board[X, Y].Feature) then
+    Inc(G.LostKeys);
+  if G.Board[X, Y].Feature = ftGate then
+    Inc(G.LostGates);
+  ClearCell(G.Board[X, Y]);
+  AddLog(G, 'The chosen final flicker is swallowed by darkness.');
+  RemoveFlickerTileAt := True;
 end;
 
 procedure CheckPhaseTransitions(var G: TGameState);
@@ -1054,7 +1111,8 @@ end;
 
 function RemainingKeys(const G: TGameState): Byte;
 begin
-  RemainingKeys := CountHeldKeys(G) + CountBoardFeature(G, ftKey) + G.FeatureKeys;
+  RemainingKeys := CountHeldKeys(G) + CountBoardFeature(G, ftKey) +
+                   CountBoardFeature(G, ftKeyArmed) + G.FeatureKeys;
 end;
 
 function RemainingGates(const G: TGameState): Byte;
