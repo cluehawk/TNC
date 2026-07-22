@@ -22,7 +22,8 @@ Implemented Special Rules
 - An already-keyed prisoner leaves a newly entered Key on its armed crumbling tile.
 - Gate tile wins only when all four keyed prisoners stand on the same gate.
 - Crumbling tiles arm on entry, drop to pits when left, and cause falling if stayed on.
-- Falling prisoners re-enter on their next turn from a chosen edge along the same row or column.
+- Prisoners choose an edge as soon as they Fall; that choice is locked while
+  the maze changes, and re-entry next turn uses its original row or column.
 - Wax eater attacks trace along straight connected passages and wrap across edges.
 - Each wax eater resolves once per trigger cascade; connected monsters chain without cycling.
 - Forced scrambles resolve the destination tile normally and continue if it is another wax eater.

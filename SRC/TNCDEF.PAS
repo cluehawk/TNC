@@ -49,6 +49,8 @@ type
     Lit: Boolean;
     HasKey: Boolean;
     Falling: Boolean;
+    FallEdgeChosen: Boolean;
+    FallDir: TDirection;
     Alive: Boolean;
     Nerve: Byte;
     NervePending: Boolean;

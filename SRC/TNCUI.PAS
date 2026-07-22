@@ -272,7 +272,12 @@ begin
   if not G.Prisoners[V].Started then
     S := 'setup'
   else if G.Prisoners[V].Falling then
-    S := 'falling'
+  begin
+    if G.Prisoners[V].FallEdgeChosen then
+      S := 'falling ' + DirName(G.Prisoners[V].FallDir)
+    else
+      S := 'choosing fall edge';
+  end
   else
     S := NumStr(G.Prisoners[V].X) + ',' + NumStr(G.Prisoners[V].Y);
   WriteAt(35, 7, 'Pos  : ' + S + '                                    ');
@@ -331,21 +336,25 @@ begin
   end
   else if G.Prisoners[G.ActiveIndex].Falling then
   begin
-    MoveText := 'Re-enter:';
-    if CanReEnterDirection(G, G.ActiveIndex, dirNorth) then
-      MoveText := MoveText + ' I';
-    if CanReEnterDirection(G, G.ActiveIndex, dirWest) then
-      MoveText := MoveText + ' J';
-    if CanReEnterDirection(G, G.ActiveIndex, dirSouth) then
-      MoveText := MoveText + ' K';
-    if CanReEnterDirection(G, G.ActiveIndex, dirEast) then
-      MoveText := MoveText + ' L';
-    if Length(MoveText) = 9 then
-      MoveText := 'Re-enter: none';
-    WarnText := 'I top of col ' + NumStr(G.Prisoners[G.ActiveIndex].X + 1) +
-                '  J left of row ' + NumStr(G.Prisoners[G.ActiveIndex].Y + 1) +
-                '  K bottom of col ' + NumStr(G.Prisoners[G.ActiveIndex].X + 1) +
-                '  L right of row ' + NumStr(G.Prisoners[G.ActiveIndex].Y + 1);
+    if not G.Prisoners[G.ActiveIndex].FallEdgeChosen then
+    begin
+      MoveText := 'Choose fall edge now';
+      WarnText := 'I north   J west   K south   L east';
+    end
+    else
+    begin
+      MoveText := 'Re-enter from ' +
+        DirName(G.Prisoners[G.ActiveIndex].FallDir) + ' edge';
+      if not CanReEnterDirection(G, G.ActiveIndex,
+        G.Prisoners[G.ActiveIndex].FallDir) then
+        MoveText := MoveText + ' (no landing)';
+      if G.Prisoners[G.ActiveIndex].FallDir in [dirNorth, dirSouth] then
+        WarnText := 'Re-entry locked to column ' +
+          NumStr(G.Prisoners[G.ActiveIndex].X + 1)
+      else
+        WarnText := 'Re-entry locked to row ' +
+          NumStr(G.Prisoners[G.ActiveIndex].Y + 1);
+    end;
   end
   else
   begin
@@ -391,7 +400,7 @@ begin
   if not G.Prisoners[G.ActiveIndex].Started then
     WriteAt(3, 24, 'Opening turn: choose any empty board space, then place the start tile.     ')
   else if G.Prisoners[G.ActiveIndex].Falling then
-    WriteAt(3, 24, 'Falling turn: choose one of the shown re-entry directions.                ')
+    WriteAt(3, 24, 'Falling turn: choose a landing tile on the locked row or column.          ')
   else if not G.Prisoners[G.ActiveIndex].Lit then
     WriteAt(3, 24, 'Lights out: must move. Only the destination is revealed this turn.        ')
   else

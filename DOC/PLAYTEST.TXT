@@ -10,9 +10,12 @@ Automated baseline: run BUILD\TEST.BAT and confirm all core regression tests pas
    Aim two candles into one empty space and confirm the placed tile connects to both.
 4. Find or force a crumbling tile. Enter it, then move away and confirm it becomes a pit.
 5. Stay on an armed crumbling tile and confirm the prisoner begins falling.
-6. On the falling prisoner's next turn, try a valid and an invalid re-entry edge.
+   Confirm the fall immediately asks for an edge and removes unsupported candlelight.
+6. Before the falling prisoner's next turn, change tiles on both possible axes.
+   Confirm re-entry remains locked to the edge selected when the fall began.
    With an exhausted stack and an empty landing space, confirm re-entry is impossible.
    When the selected row/column is full, confirm an existing tile can be selected.
+   After landing, confirm the prisoner still takes a normal Move or Stay action.
 7. Move into line of sight of a monster and confirm lights-out plus draw loss.
    Move along, into, and sideways out of its line; confirm all three trigger it,
    but a sideways escape is not struck if it leaves the attack corridor.

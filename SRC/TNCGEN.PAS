@@ -706,6 +706,8 @@ begin
     G.Prisoners[I].Lit := True;
     G.Prisoners[I].HasKey := False;
     G.Prisoners[I].Falling := False;
+    G.Prisoners[I].FallEdgeChosen := False;
+    G.Prisoners[I].FallDir := dirNorth;
     G.Prisoners[I].Alive := True;
     G.Prisoners[I].Nerve := StartNerve;
     G.Prisoners[I].NervePending := False;

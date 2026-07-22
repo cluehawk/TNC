@@ -121,6 +121,43 @@ begin
   CheckWinLoss(G);
 end;
 
+function ResolveFallEdge(var G: TGameState; Index: Byte): Boolean;
+var
+  Cmd: Char;
+  Dir: TDirection;
+begin
+  ResolveFallEdge := False;
+  if not G.Prisoners[Index].Falling then
+  begin
+    ResolveFallEdge := True;
+    Exit;
+  end;
+  if G.Prisoners[Index].FallEdgeChosen then
+  begin
+    ResolveFallEdge := True;
+    Exit;
+  end;
+
+  repeat
+    DrawGame(G);
+    WriteAt(3, 23, 'Fall edge: I north   J west   K south   L east                         ');
+    WriteAt(3, 24, 'Choose now. Re-entry will remain locked to that row or column.          ');
+    GetAction(G, Cmd, Dir);
+    if Cmd = 'Q' then
+    begin
+      G.Phase := gpLoss;
+      AddLog(G, 'The player abandons the labyrinth.');
+      Exit;
+    end;
+    if Cmd = 'M' then
+      if ChooseFallEdge(G, Index, Dir) then
+      begin
+        ResolveFallEdge := True;
+        Exit;
+      end;
+  until False;
+end;
+
 function PopScheduledMonster(var Scheduled: TBoolGrid; var X, Y: Byte): Boolean;
 var
   SX, SY: Byte;
@@ -271,8 +308,10 @@ begin
 
   if ChooseFall then
   begin
-    G.Prisoners[Index].Falling := True;
+    BeginPrisonerFall(G, Index);
     AddLog(G, PrisonerName(Index) + ' falls through the charged monster''s pit.');
+    if not ResolveFallEdge(G, Index) then
+      Exit;
     ResolveChargeAftermath := True;
     Exit;
   end;
@@ -345,6 +384,11 @@ var
 begin
   RefreshBoard := DidMove or G.Prisoners[Index].Falling;
 
+  if G.Prisoners[Index].Falling and
+     (not G.Prisoners[Index].FallEdgeChosen) then
+    if not ResolveFallEdge(G, Index) then
+      Exit;
+
   RebuildOccupancy(G);
   if DidMove or G.Prisoners[Index].Falling then
     BuildMoveTriggeredMonsters(BeforeMoveState, AfterMoveState, Index, OldX, OldY, Scheduled)
@@ -413,6 +457,42 @@ begin
   OldY := G.Prisoners[Index].Y;
   BeforeMoveState := G;
   AfterMoveState := G;
+
+  { A falling prisoner already chose an edge when the fall began.  Resolve
+    that locked landing line before offering the normal Move or Stay. }
+  if G.Prisoners[Index].Falling then
+  begin
+    if not G.Prisoners[Index].FallEdgeChosen then
+      if not ResolveFallEdge(G, Index) then
+        Exit;
+    if not ResolveFallingLanding(G, Index, G.Prisoners[Index].FallDir) then
+    begin
+      if not (G.Phase in [gpWin, gpLoss]) then
+      begin
+        G.Phase := gpLoss;
+        AddLog(G, PrisonerName(Index) + ' falls forever outside the maze.');
+      end;
+      Exit;
+    end;
+    if G.Phase in [gpWin, gpLoss] then
+      Exit;
+
+    OldX := G.Prisoners[Index].X;
+    OldY := G.Prisoners[Index].Y;
+    BeforeMoveState := G;
+    AfterMoveState := G;
+    AddLog(G, PrisonerName(Index) + ' may now take the turn normally.');
+
+    if (not G.Prisoners[Index].Lit) and
+       (G.Prisoners[Index].Nerve = 0) and
+       (not PrisonerHasAnyMove(G, Index)) then
+    begin
+      G.Phase := gpLoss;
+      AddLog(G, PrisonerName(Index) + ' lands lights out with no legal move.');
+      Exit;
+    end;
+  end;
+
   repeat
     DrawGame(G);
     if MoveOnly then
@@ -430,17 +510,12 @@ begin
         end;
       'P':
         begin
-          if G.Prisoners[Index].Falling then
-            AddLog(G, 'A falling prisoner cannot pass a key.')
-          else
-            ResolveKeyPass(G, Index);
+          ResolveKeyPass(G, Index);
         end;
       'S':
         begin
           if MoveOnly then
             AddLog(G, 'Nerve grants an extra move, not another stay.')
-          else if G.Prisoners[Index].Falling then
-            AddLog(G, 'Choose a re-entry direction instead of staying.')
           else if StayPrisoner(G, Index) then
           begin
             ResolveStayMonsterReplacement(G, Index);
@@ -452,24 +527,7 @@ begin
         end;
       'M':
         begin
-          if G.Prisoners[Index].Falling then
-          begin
-            if ResolveFallingLanding(G, Index, Dir) then
-            begin
-              OldX := G.Prisoners[Index].X;
-              OldY := G.Prisoners[Index].Y;
-              DidMove := False;
-              { The landing, its illumination, and any landing monster have
-                finished.  A subsequent normal move must compare against
-                this board, not the stale pre-fall snapshot. }
-              BeforeMoveState := G;
-              AfterMoveState := G;
-              AddLog(G, PrisonerName(Index) + ' may now take the turn normally.');
-            end
-            else
-              AddLog(G, 'No legal landing from that edge.');
-          end
-          else if MoveRequiresCharge(G, Index, Dir) then
+          if MoveRequiresCharge(G, Index, Dir) then
           begin
             if G.Prisoners[Index].Nerve = 0 then
               AddLog(G, 'Charging a wax eater requires 1 nerve.')

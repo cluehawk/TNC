@@ -39,7 +39,11 @@ begin
     for Y := 0 to BoardH - 1 do
       ClearCell(G.Board[X, Y]);
   for I := 0 to PrisonerCount - 1 do
+  begin
     G.Prisoners[I].Alive := False;
+    G.Prisoners[I].FallEdgeChosen := False;
+    G.Prisoners[I].FallDir := dirNorth;
+  end;
   G.Phase := gpFinal;
   G.TurnNumber := 1;
   ClearLog(G);
@@ -67,6 +71,8 @@ begin
     G.Prisoners[I].Lit := True;
     G.Prisoners[I].HasKey := True;
     G.Prisoners[I].Falling := False;
+    G.Prisoners[I].FallEdgeChosen := False;
+    G.Prisoners[I].FallDir := dirNorth;
     G.Prisoners[I].Nerve := 0;
     G.Prisoners[I].NervePending := False;
   end;
@@ -668,6 +674,250 @@ begin
     'charged wax eater pit remains after the prisoner scrambles');
 end;
 
+procedure TestCrumbleAndPitLifecycle;
+var
+  G: TGameState;
+begin
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].X := 1;
+  G.Prisoners[0].Y := 1;
+  PutCell(G, 1, 1, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 1, tkStraight, 1, ftCrumbleFresh, []);
+  PutCell(G, 3, 1, tkCross, 0, ftNone, []);
+  RebuildOccupancy(G);
+  Check(MovePrisoner(G, 0, dirEast),
+    'prisoner enters a fresh crumbling passage');
+  Check(G.Board[2, 1].Feature = ftCrumbleArmed,
+    'entering a crumbling passage arms it for collapse');
+  Check(PrisonerOnBreakableTile(G, 0),
+    'armed crumbling passage is reported beneath the prisoner');
+  RebuildOccupancy(G);
+  Check(MovePrisoner(G, 0, dirEast),
+    'prisoner moves away from an armed crumbling passage');
+  Check((G.Board[2, 1].Kind = tkPit) and
+        (G.Board[2, 1].Feature = ftNone),
+    'leaving an armed crumbling passage turns it into a pit');
+  Check(not G.Prisoners[0].Falling,
+    'moving safely away from a crumble does not make the prisoner fall');
+
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].X := 1;
+  G.Prisoners[0].Y := 1;
+  PutCell(G, 1, 1, tkStart, 0, ftNone, []);
+  PutCell(G, 2, 1, tkCross, 0, ftNone, []);
+  RebuildOccupancy(G);
+  Check(MovePrisoner(G, 0, dirEast),
+    'prisoner leaves a starting tile through its open passage');
+  Check(G.Board[1, 1].Kind = tkPit,
+    'starting tile collapses into a pit when left');
+
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].Nerve := 0;
+  G.Prisoners[0].X := 2;
+  G.Prisoners[0].Y := 2;
+  PutCell(G, 2, 2, tkTJunction, 1, ftCrumbleArmed, []);
+  RebuildOccupancy(G);
+  Check(StayPrisoner(G, 0),
+    'prisoner may stay on an armed crumbling tile');
+  Check((G.Board[2, 2].Kind = tkPit) and G.Prisoners[0].Falling,
+    'staying collapses the tile and begins a fall');
+  Check(not G.Prisoners[0].FallEdgeChosen,
+    'new fall waits for its immediate edge choice');
+  Check(G.Prisoners[0].NervePending,
+    'a lit stay still earns nerve when the tile collapses');
+  Check(ChooseFallEdge(G, 0, dirWest) and
+        G.Prisoners[0].FallEdgeChosen and
+        (G.Prisoners[0].FallDir = dirWest),
+    'fall edge is recorded when the fall begins');
+
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].HasKey := True;
+  G.Prisoners[0].X := 1;
+  G.Prisoners[0].Y := 1;
+  PutCell(G, 1, 1, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 1, tkPit, 0, ftNone, []);
+  RebuildOccupancy(G);
+  Check(CanMoveDirection(G, 0, dirEast),
+    'an open passage permits an intentional leap into an adjacent pit');
+  Check(MovePrisoner(G, 0, dirEast),
+    'prisoner deliberately moves into the pit');
+  Check(G.Prisoners[0].Falling and
+        (G.Prisoners[0].X = 2) and (G.Prisoners[0].Y = 1),
+    'pit entry immediately places the prisoner in the falling state');
+  Check(not PrisonerHasAnyMove(G, 0),
+    'falling prisoner cannot take another movement action');
+end;
+
+procedure TestFallingLightAndMonsterTrigger;
+var
+  G, BeforeG, AfterG: TGameState;
+  Scheduled, Resolved: TBoolGrid;
+  Victims: Byte;
+begin
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].X := 2;
+  G.Prisoners[0].Y := 2;
+  PutCell(G, 2, 2, tkStart, 0, ftNone, [cfLit]);
+  PutCell(G, 2, 1, tkCross, 0, ftNone, [cfLit]);
+  PutCell(G, 3, 2, tkCross, 0, ftNone, [cfLit]);
+  RebuildOccupancy(G);
+  Check(StayPrisoner(G, 0),
+    'staying on a starting tile begins a candlelit fall');
+  ChooseFallEdge(G, 0, dirNorth);
+  RebuildOccupancy(G);
+  RecomputeLighting(G);
+  CollapseDarkness(G);
+  Check((not IsPresent(G.Board[2, 2])) and
+        (not IsPresent(G.Board[2, 1])) and
+        (not IsPresent(G.Board[3, 2])),
+    'falling candle no longer preserves its former illuminated tiles');
+
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].X := 2;
+  G.Prisoners[0].Y := 2;
+  G.Prisoners[1].Alive := True;
+  G.Prisoners[1].Started := True;
+  G.Prisoners[1].Lit := True;
+  G.Prisoners[1].X := 1;
+  G.Prisoners[1].Y := 2;
+  PutCell(G, 0, 2, tkCross, 0, ftMonster, []);
+  PutCell(G, 1, 2, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 2, tkTJunction, 1, ftCrumbleArmed, []);
+  RebuildOccupancy(G);
+  BeforeG := G;
+  Check(StayPrisoner(G, 0),
+    'staying prisoner falls through a crumble in monster sight');
+  AfterG := G;
+  BuildMoveTriggeredMonsters(BeforeG, AfterG, 0, 2, 2, Scheduled);
+  Check(Scheduled[0, 2],
+    'falling through a crumble triggers a watching wax eater');
+  Scheduled[0, 2] := False;
+  FillChar(Resolved, SizeOf(Resolved), 0);
+  Resolved[0, 2] := True;
+  Victims := MonsterVictimMaskAndChains(AfterG, 0, 2, Scheduled, Resolved);
+  Check(((Victims and 1) = 0) and ((Victims and 2) <> 0),
+    'falling prisoner evades while another prisoner in the attack line is hit');
+end;
+
+procedure TestLockedFallingEntry;
+var
+  G: TGameState;
+  EmptyEligible, ExistingEligible: TBoolGrid;
+  EmptyCount, ExistingCount: Byte;
+begin
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].X := 2;
+  G.Prisoners[0].Y := 3;
+  BeginPrisonerFall(G, 0);
+  ChooseFallEdge(G, 0, dirNorth);
+  BuildFallingTargets(G, 0, dirNorth, EmptyEligible, ExistingEligible,
+    EmptyCount, ExistingCount);
+  Check(EmptyCount = BoardH,
+    'chosen north edge exposes only the original column for landing');
+  BuildFallingTargets(G, 0, dirWest, EmptyEligible, ExistingEligible,
+    EmptyCount, ExistingCount);
+  Check((EmptyCount = 0) and (ExistingCount = 0),
+    'a different row or column cannot be chosen on the next turn');
+
+  PutCell(G, 2, 1, tkCross, 0, ftKey, []);
+  Check(not LandFallingPrisoner(G, 0, 2, 1),
+    'existing tile cannot be selected while the locked line has empty spaces');
+
+  ResetState(G);
+  G.Phase := gpMaze;
+  G.DrawsRemaining := 1;
+  G.TileStack[1].Kind := tkCross;
+  G.TileStack[1].Feature := ftKey;
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].X := 2;
+  G.Prisoners[0].Y := 2;
+  BeginPrisonerFall(G, 0);
+  ChooseFallEdge(G, 0, dirNorth);
+  PutCell(G, 2, 1, tkCross, 0, ftNone, []);
+  Check(not ResolveFallingEntry(G, 0, dirWest),
+    're-entry rejects an edge different from the stored fall edge');
+  Check(ResolveFallingEntry(G, 0, dirNorth),
+    'prisoner draws a landing tile on the stored column');
+  Check((not G.Prisoners[0].Falling) and
+        (not G.Prisoners[0].FallEdgeChosen) and
+        G.Prisoners[0].HasKey,
+    'landing clears fall state and resolves the landing tile feature');
+  RebuildOccupancy(G);
+  Check(MovePrisoner(G, 0, dirSouth),
+    'landed prisoner can immediately take the normal turn');
+  Check(G.Board[2, 0].Kind = tkPit,
+    'moving normally after landing collapses the landed-on key tile');
+end;
+
+procedure TestLockedFallReachability;
+var
+  G: TGameState;
+
+  procedure PrepareScenario(var S: TGameState; Edge: TDirection);
+  var
+    I, Y: Byte;
+  begin
+    ResetState(S);
+    PrepareFinalPrisoners(S);
+    S.Prisoners[0].X := 0;
+    S.Prisoners[0].Y := 0;
+    BeginPrisonerFall(S, 0);
+    ChooseFallEdge(S, 0, Edge);
+    for I := 1 to PrisonerCount - 1 do
+    begin
+      S.Prisoners[I].X := 3;
+      S.Prisoners[I].Y := 3;
+    end;
+
+    PutCell(S, 0, 0, tkPit, 0, ftNone, []);
+    for Y := 1 to BoardH - 1 do
+      PutCell(S, 0, Y, tkStraight, 1, ftNone, []);
+    PutCell(S, 1, 0, tkStraight, 1, ftNone, []);
+    PutCell(S, 2, 0, tkStraight, 1, ftNone, []);
+    PutCell(S, 3, 0, tkCorner, 2, ftNone, []);
+    PutCell(S, 4, 0, tkPit, 0, ftNone, []);
+    PutCell(S, 5, 0, tkPit, 0, ftNone, []);
+    PutCell(S, 3, 1, tkStraight, 0, ftNone, []);
+    PutCell(S, 3, 2, tkStraight, 0, ftNone, []);
+    PutCell(S, 3, 3, tkCross, 0, ftGate, []);
+    RebuildOccupancy(S);
+  end;
+
+begin
+  PrepareScenario(G, dirNorth);
+  CheckWinLoss(G);
+  Check(G.Phase = gpLoss,
+    'Final Flickers rejects a gate reachable only from the unchosen fall row');
+
+  PrepareScenario(G, dirEast);
+  CheckWinLoss(G);
+  Check(G.Phase = gpFinal,
+    'Final Flickers accepts the gate when the stored fall row reaches it');
+end;
+
 procedure TestFallingLanding;
 var
   G: TGameState;
@@ -677,9 +927,11 @@ begin
   G.Prisoners[0].Alive := True;
   G.Prisoners[0].Started := True;
   G.Prisoners[0].Lit := True;
-  G.Prisoners[0].Falling := True;
   G.Prisoners[0].X := 2;
   G.Prisoners[0].Y := 2;
+  BeginPrisonerFall(G, 0);
+  Check(ChooseFallEdge(G, 0, dirNorth),
+    'falling prisoner locks an edge before re-entry');
 
   PutCell(G, 2, 0, tkCross, 0, ftNone, []);
   Check(not CanReEnterDirection(G, 0, dirNorth),
@@ -694,11 +946,17 @@ begin
   G.Prisoners[0].Alive := True;
   G.Prisoners[0].Started := True;
   G.Prisoners[0].Lit := True;
-  G.Prisoners[0].Falling := True;
-  PutCell(G, 3, 3, tkCross, 0, ftKey, []);
-  Check(LandFallingPrisoner(G, 0, 3, 3), 'prisoner lands on an existing key');
+  G.Prisoners[0].X := 3;
+  G.Prisoners[0].Y := 3;
+  BeginPrisonerFall(G, 0);
+  ChooseFallEdge(G, 0, dirNorth);
+  G.Phase := gpMaze;
+  G.DrawsRemaining := 1;
+  G.TileStack[1].Kind := tkCross;
+  G.TileStack[1].Feature := ftKey;
+  Check(LandFallingPrisoner(G, 0, 3, 0), 'prisoner draws and lands on a key');
   Check(G.Prisoners[0].HasKey, 'landing prisoner collects the key');
-  Check(G.Board[3, 3].Feature = ftCrumbleArmed,
+  Check(G.Board[3, 0].Feature = ftCrumbleArmed,
     'landed-on key tile becomes armed crumble');
 end;
 
@@ -924,6 +1182,10 @@ begin
   TestMonsterTriggerGeometry;
   TestMonsterHitPenalties;
   TestMonsterAftermath;
+  TestCrumbleAndPitLifecycle;
+  TestFallingLightAndMonsterTrigger;
+  TestLockedFallingEntry;
+  TestLockedFallReachability;
   TestFallingLanding;
   TestUnclaimedKeyOnArmedTile;
   TestPassThenClaimStandingKey;

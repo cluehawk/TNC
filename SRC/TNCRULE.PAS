@@ -13,6 +13,8 @@ function CanMoveDirection(const G: TGameState; Index: Byte; Dir: TDirection): Bo
 function MoveRequiresCharge(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function MovePrisoner(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function StayPrisoner(var G: TGameState; Index: Byte): Boolean;
+procedure BeginPrisonerFall(var G: TGameState; Index: Byte);
+function ChooseFallEdge(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 procedure ApplyPendingNerve(var G: TGameState; Index: Byte);
 function CanPassKey(const G: TGameState; Index: Byte): Boolean;
 procedure BuildKeyPassTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
@@ -238,6 +240,29 @@ begin
                                        ftCrumbleFresh, ftCrumbleArmed]);
 end;
 
+procedure BeginPrisonerFall(var G: TGameState; Index: Byte);
+begin
+  if Index >= PrisonerCount then
+    Exit;
+  G.Prisoners[Index].Falling := True;
+  G.Prisoners[Index].FallEdgeChosen := False;
+end;
+
+function ChooseFallEdge(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
+begin
+  ChooseFallEdge := False;
+  if Index >= PrisonerCount then
+    Exit;
+  if not G.Prisoners[Index].Falling then
+    Exit;
+
+  G.Prisoners[Index].FallDir := Dir;
+  G.Prisoners[Index].FallEdgeChosen := True;
+  AddLog(G, PrisonerName(Index) + ' chooses the ' + DirName(Dir) +
+    ' edge for re-entry.');
+  ChooseFallEdge := True;
+end;
+
 function IsPitCell(const Cell: TCell): Boolean;
 begin
   IsPitCell := IsPresent(Cell) and (Cell.Kind = tkPit);
@@ -377,7 +402,7 @@ begin
 
   if IsPitCell(G.Board[NX, NY]) then
   begin
-    G.Prisoners[Index].Falling := True;
+    BeginPrisonerFall(G, Index);
     AddLog(G, PrisonerName(Index) + ' leaps into a pit and falls.');
     MovePrisoner := True;
     Exit;
@@ -439,7 +464,7 @@ begin
 
   if IsPitCell(G.Board[X, Y]) then
   begin
-    G.Prisoners[Index].Falling := True;
+    BeginPrisonerFall(G, Index);
     AddLog(G, PrisonerName(Index) + ' falls from the pit.');
     StayPrisoner := True;
     Exit;
@@ -448,7 +473,7 @@ begin
   if TileBreaksOnUse(G.Board[X, Y]) then
   begin
     ConvertToPit(G, X, Y);
-    G.Prisoners[Index].Falling := True;
+    BeginPrisonerFall(G, Index);
     AddLog(G, PrisonerName(Index) + ' falls as the tile gives way.');
   end;
 
@@ -566,7 +591,9 @@ begin
   EmptyCount := 0;
   ExistingCount := 0;
 
-  if not G.Prisoners[Index].Falling then
+  if (not G.Prisoners[Index].Falling) or
+     (not G.Prisoners[Index].FallEdgeChosen) or
+     (Dir <> G.Prisoners[Index].FallDir) then
     Exit;
 
   case Dir of
@@ -651,21 +678,17 @@ end;
 
 function HasAnyReEntry(const G: TGameState; Index: Byte): Boolean;
 var
-  Dir: TDirection;
   EmptyEligible, ExistingEligible: TBoolGrid;
   EmptyCount, ExistingCount: Byte;
 begin
   HasAnyReEntry := False;
-  for Dir := dirNorth to dirWest do
-  begin
-    BuildFallingTargets(G, Index, Dir, EmptyEligible, ExistingEligible, EmptyCount, ExistingCount);
-    if ((EmptyCount > 0) and (G.DrawsRemaining > 0)) or
-       ((EmptyCount = 0) and (ExistingCount > 0)) then
-    begin
-      HasAnyReEntry := True;
-      Exit;
-    end;
-  end;
+  if (Index >= PrisonerCount) or (not G.Prisoners[Index].Falling) or
+     (not G.Prisoners[Index].FallEdgeChosen) then
+    Exit;
+  BuildFallingTargets(G, Index, G.Prisoners[Index].FallDir,
+    EmptyEligible, ExistingEligible, EmptyCount, ExistingCount);
+  HasAnyReEntry := ((EmptyCount > 0) and (G.DrawsRemaining > 0)) or
+                   ((EmptyCount = 0) and (ExistingCount > 0));
 end;
 
 function CanReEnterDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
@@ -679,24 +702,37 @@ begin
 end;
 
 function LandFallingPrisoner(var G: TGameState; Index, X, Y: Byte): Boolean;
+var
+  EmptyEligible, ExistingEligible: TBoolGrid;
+  EmptyCount, ExistingCount: Byte;
 begin
   LandFallingPrisoner := False;
-  if not G.Prisoners[Index].Falling then
+  if (Index >= PrisonerCount) or (X >= BoardW) or (Y >= BoardH) then
     Exit;
+  if (not G.Prisoners[Index].Falling) or
+     (not G.Prisoners[Index].FallEdgeChosen) then
+    Exit;
+
+  BuildFallingTargets(G, Index, G.Prisoners[Index].FallDir,
+    EmptyEligible, ExistingEligible, EmptyCount, ExistingCount);
 
   if not IsPresent(G.Board[X, Y]) then
   begin
-    if G.DrawsRemaining = 0 then
+    if (not EmptyEligible[X, Y]) or (G.DrawsRemaining = 0) then
       Exit;
     if not PlaceFreeTileAt(G, X, Y) then
       Exit;
   end
-  else if not CanOccupyCell(G, X, Y) then
-    Exit;
+  else
+  begin
+    if (EmptyCount > 0) or (not ExistingEligible[X, Y]) then
+      Exit;
+  end;
 
   G.Prisoners[Index].X := X;
   G.Prisoners[Index].Y := Y;
   G.Prisoners[Index].Falling := False;
+  G.Prisoners[Index].FallEdgeChosen := False;
   AddLog(G, PrisonerName(Index) + ' lands back in the maze.');
   HandleEntryFeature(G, Index);
   if IsPresent(G.Board[X, Y]) and (G.Board[X, Y].Feature = ftMonster) then
@@ -1231,28 +1267,41 @@ var
     end;
   end;
 
-  procedure AddFallLandings(FX, FY: Byte);
+  procedure AddFallLine(FX, FY: Byte; FallDir: TDirection);
   var
     K: Byte;
     FullLine: Boolean;
   begin
     { With no Draw Stack, an existing tile can be used only when the chosen
       row or column contains no empty landing space. }
-    FullLine := True;
-    for K := 0 to BoardW - 1 do
-      if not IsPresent(G.Board[K, FY]) then
-        FullLine := False;
-    if FullLine then
+    if FallDir in [dirWest, dirEast] then
+    begin
+      FullLine := True;
       for K := 0 to BoardW - 1 do
-        Enqueue(K, FY);
-
-    FullLine := True;
-    for K := 0 to BoardH - 1 do
-      if not IsPresent(G.Board[FX, K]) then
-        FullLine := False;
-    if FullLine then
+        if not IsPresent(G.Board[K, FY]) then
+          FullLine := False;
+      if FullLine then
+        for K := 0 to BoardW - 1 do
+          Enqueue(K, FY);
+    end
+    else
+    begin
+      FullLine := True;
       for K := 0 to BoardH - 1 do
-        Enqueue(FX, K);
+        if not IsPresent(G.Board[FX, K]) then
+          FullLine := False;
+      if FullLine then
+        for K := 0 to BoardH - 1 do
+          Enqueue(FX, K);
+    end;
+  end;
+
+  procedure AddFallLandings(FX, FY: Byte);
+  begin
+    { A future fall may choose either axis.  A prisoner already falling is
+      handled separately with the edge locked when the fall began. }
+    AddFallLine(FX, FY, dirNorth);
+    AddFallLine(FX, FY, dirWest);
   end;
 
 begin
@@ -1264,7 +1313,11 @@ begin
     Exit;
 
   if G.Prisoners[Index].Falling then
-    AddFallLandings(G.Prisoners[Index].X, G.Prisoners[Index].Y)
+  begin
+    if G.Prisoners[Index].FallEdgeChosen then
+      AddFallLine(G.Prisoners[Index].X, G.Prisoners[Index].Y,
+        G.Prisoners[Index].FallDir)
+  end
   else
     Enqueue(G.Prisoners[Index].X, G.Prisoners[Index].Y);
 
