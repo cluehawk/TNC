@@ -390,6 +390,58 @@ begin
   Check(G.LostGates = 1, 'gate replaced by a staying wax eater is counted lost');
 end;
 
+procedure TestMonsterAftermath;
+var
+  G: TGameState;
+begin
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := False;
+  G.Prisoners[0].X := 1;
+  G.Prisoners[0].Y := 1;
+  PutCell(G, 1, 1, tkCross, 0, ftMonster, []);
+  PutCell(G, 2, 1, tkCross, 0, ftNone, []);
+  RebuildOccupancy(G);
+  Check(ScrambleLandingPrisoner(G, 0, dirEast),
+    'ordinary lights-out monster encounter allows a scramble');
+  Check(G.Board[1, 1].Feature = ftMonster,
+    'ordinary lights-out encounter leaves the wax eater in place');
+
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := False;
+  G.Prisoners[0].X := 1;
+  G.Prisoners[0].Y := 1;
+  PutCell(G, 1, 1, tkCross, 0, ftMonster, []);
+  PutCell(G, 2, 1, tkCross, 0, ftNone, []);
+  RebuildOccupancy(G);
+  Check(ScrambleFromMonster(G, 0, dirEast, True, 1, 1),
+    'falling prisoner scrambles away from a landed-on wax eater');
+  Check(not IsPresent(G.Board[1, 1]),
+    'landed-on wax eater is discarded after the scramble');
+
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := False;
+  G.Prisoners[0].X := 1;
+  G.Prisoners[0].Y := 1;
+  PutCell(G, 1, 1, tkCross, 0, ftMonster, []);
+  PutCell(G, 2, 1, tkCross, 0, ftNone, []);
+  RebuildOccupancy(G);
+  Check(ConvertMonsterToPit(G, 1, 1),
+    'charged wax eater converts into a pit after attacking');
+  Check(PrisonerOnPit(G, 0),
+    'charger remains over the new pit until choosing fall or scramble');
+  Check(ScrambleFromMonster(G, 0, dirEast, False, 1, 1),
+    'charger may scramble from the resulting pit');
+  Check(IsPresent(G.Board[1, 1]) and (G.Board[1, 1].Kind = tkPit) and
+        (G.Board[1, 1].Feature = ftNone),
+    'charged wax eater pit remains after the prisoner scrambles');
+end;
+
 procedure TestFallingLanding;
 var
   G: TGameState;
@@ -643,6 +695,7 @@ begin
   TestRelitCandleExpansion;
   TestStayNerveRules;
   TestMonsterChainResolution;
+  TestMonsterAftermath;
   TestFallingLanding;
   TestUnclaimedKeyOnArmedTile;
   TestPassThenClaimStandingKey;

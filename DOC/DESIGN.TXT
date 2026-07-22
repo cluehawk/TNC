@@ -26,6 +26,10 @@ Implemented Special Rules
 - Wax eater attacks trace along straight connected passages and wrap across edges.
 - Each wax eater resolves once per trigger cascade; connected monsters chain without cycling.
 - Forced scrambles resolve the destination tile normally and continue if it is another wax eater.
+- Charging a wax eater resolves its attack, turns that monster into a Pit, and
+  lets the charging Prisoner either Fall or scramble to an adjacent tile.
+- A wax eater landed on while Falling attacks before illumination, forces a
+  scramble, and is then discarded. Ordinary Lights Out encounters leave it in place.
 - Lights-out prisoners cannot reveal new tiles.
 - Adjacency or sharing a tile with a lit prisoner relights a lights-out prisoner.
 - Relighting is resolved before illumination, so the restored candle immediately

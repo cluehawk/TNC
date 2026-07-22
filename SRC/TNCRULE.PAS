@@ -26,6 +26,10 @@ procedure BuildFallingTargets(const G: TGameState; Index: Byte; Dir: TDirection;
 function LandFallingPrisoner(var G: TGameState; Index, X, Y: Byte): Boolean;
 function CanLandingScrambleDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function ScrambleLandingPrisoner(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
+function ScrambleFromMonster(var G: TGameState; Index: Byte; Dir: TDirection;
+  DiscardOrigin: Boolean; OriginX, OriginY: Byte): Boolean;
+function ConvertMonsterToPit(var G: TGameState; X, Y: Byte): Boolean;
+function DiscardMonsterTile(var G: TGameState; X, Y: Byte): Boolean;
 procedure BuildMoveTriggeredMonsters(const BeforeG, AfterG: TGameState; ActiveIndex, OldX, OldY: Byte;
   var Scheduled: TBoolGrid);
 procedure BuildLandingTriggeredMonsters(const G: TGameState; Index: Byte; var Scheduled: TBoolGrid);
@@ -197,6 +201,34 @@ begin
   G.Board[X, Y].Rot := 0;
   G.Board[X, Y].Feature := ftNone;
   G.Board[X, Y].Flags := G.Board[X, Y].Flags + [cfPresent];
+end;
+
+function ConvertMonsterToPit(var G: TGameState; X, Y: Byte): Boolean;
+begin
+  ConvertMonsterToPit := False;
+  if (X >= BoardW) or (Y >= BoardH) then
+    Exit;
+  if (not IsPresent(G.Board[X, Y])) or
+     (G.Board[X, Y].Feature <> ftMonster) then
+    Exit;
+
+  ConvertToPit(G, X, Y);
+  AddLog(G, 'The charged wax eater collapses into a pit.');
+  ConvertMonsterToPit := True;
+end;
+
+function DiscardMonsterTile(var G: TGameState; X, Y: Byte): Boolean;
+begin
+  DiscardMonsterTile := False;
+  if (X >= BoardW) or (Y >= BoardH) then
+    Exit;
+  if (not IsPresent(G.Board[X, Y])) or
+     (G.Board[X, Y].Feature <> ftMonster) then
+    Exit;
+
+  ClearCell(G.Board[X, Y]);
+  AddLog(G, 'The landed-on wax eater is discarded.');
+  DiscardMonsterTile := True;
 end;
 
 function TileBreaksOnUse(const Cell: TCell): Boolean;
@@ -751,6 +783,17 @@ begin
   AddLog(G, PrisonerName(Index) + ' scrambles ' + DirName(Dir) + ' from the monster.');
   HandleEntryFeature(G, Index);
   ScrambleLandingPrisoner := True;
+end;
+
+function ScrambleFromMonster(var G: TGameState; Index: Byte; Dir: TDirection;
+  DiscardOrigin: Boolean; OriginX, OriginY: Byte): Boolean;
+begin
+  ScrambleFromMonster := False;
+  if not ScrambleLandingPrisoner(G, Index, Dir) then
+    Exit;
+  if DiscardOrigin then
+    DiscardMonsterTile(G, OriginX, OriginY);
+  ScrambleFromMonster := True;
 end;
 
 function MonsterSeesCell(const G: TGameState; MX, MY, TX, TY: Byte; var HitDir: TDirection): Boolean;

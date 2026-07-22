@@ -19,6 +19,10 @@ Automated baseline: run BUILD\TEST.BAT and confirm all core regression tests pas
    Scramble onto a Key or crumble tile and confirm its entry effect resolves.
    Scramble onto another wax eater and confirm the second attack resolves before another scramble.
    Draw a wax eater while Staying and confirm it replaces the target with a 4-way monster tile.
+   Charge a wax eater and confirm it becomes a pit after attacking; test both
+   choosing to Fall and choosing to scramble from that pit.
+   Land on a wax eater while Falling and confirm it attacks before illumination,
+   then is discarded after the forced scramble.
 8. Move a lit prisoner adjacent to a lights-out prisoner and confirm relight.
    Repeat by moving the lights-out prisoner beside the lit prisoner.
    Confirm the newly relit candle immediately reveals its complete radius.

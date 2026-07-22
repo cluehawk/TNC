@@ -172,7 +172,16 @@ begin
   end;
 end;
 
-function ResolveMonsterScramble(var G: TGameState; Index: Byte; const PromptText: string): Boolean;
+function HasMonsterScramble(const G: TGameState; Index: Byte): Boolean;
+begin
+  HasMonsterScramble := CanLandingScrambleDirection(G, Index, dirNorth) or
+                        CanLandingScrambleDirection(G, Index, dirWest) or
+                        CanLandingScrambleDirection(G, Index, dirSouth) or
+                        CanLandingScrambleDirection(G, Index, dirEast);
+end;
+
+function ResolveMonsterScramble(var G: TGameState; Index: Byte; const PromptText: string;
+  DiscardOrigin: Boolean; OriginX, OriginY: Byte): Boolean;
 var
   Cmd: Char;
   Dir: TDirection;
@@ -180,10 +189,7 @@ var
   HasScramble: Boolean;
 begin
   ResolveMonsterScramble := True;
-  HasScramble := CanLandingScrambleDirection(G, Index, dirNorth) or
-                 CanLandingScrambleDirection(G, Index, dirWest) or
-                 CanLandingScrambleDirection(G, Index, dirSouth) or
-                 CanLandingScrambleDirection(G, Index, dirEast);
+  HasScramble := HasMonsterScramble(G, Index);
   if not HasScramble then
   begin
     G.Phase := gpLoss;
@@ -215,45 +221,83 @@ begin
       ResolveMonsterScramble := False;
       Exit;
     end;
-    if (Cmd = 'M') and ScrambleLandingPrisoner(G, Index, Dir) then
+    if (Cmd = 'M') and
+       ScrambleFromMonster(G, Index, Dir, DiscardOrigin, OriginX, OriginY) then
       Break;
   until False;
 end;
 
 function ResolveMonsterEscape(var G: TGameState; Index: Byte;
-  const PromptText: string): Boolean;
+  const PromptText: string; DiscardFirst: Boolean; OriginX, OriginY: Byte): Boolean;
 var
   Scheduled: TBoolGrid;
 begin
   ResolveMonsterEscape := False;
-  while PrisonerOnMonster(G, Index) do
+  repeat
   begin
-    if not ResolveMonsterScramble(G, Index, PromptText) then
+    if not ResolveMonsterScramble(G, Index, PromptText,
+      DiscardFirst, OriginX, OriginY) then
       Exit;
+    DiscardFirst := False;
 
     { A forced scramble still enters its destination normally.  If that
       destination is another wax eater, the new monster attacks before the
       prisoner can finish escaping. }
-    if PrisonerOnMonster(G, Index) then
-    begin
-      BuildLandingTriggeredMonsters(G, Index, Scheduled);
-      ResolveMonsterHits(G, Scheduled);
-    end;
+    if not PrisonerOnMonster(G, Index) then
+      Break;
+    BuildLandingTriggeredMonsters(G, Index, Scheduled);
+    ResolveMonsterHits(G, Scheduled);
   end;
+  until False;
   ResolveMonsterEscape := True;
+end;
+
+function ResolveChargeAftermath(var G: TGameState; Index, MonsterX,
+  MonsterY: Byte): Boolean;
+var
+  ChooseFall: Boolean;
+begin
+  ResolveChargeAftermath := False;
+  if not ConvertMonsterToPit(G, MonsterX, MonsterY) then
+    Exit;
+
+  if not HasMonsterScramble(G, Index) then
+    ChooseFall := True
+  else
+  begin
+    DrawGame(G);
+    ChooseFall := PromptYesNo('Charged wax eater is now a pit. Fall instead of scramble?');
+  end;
+
+  if ChooseFall then
+  begin
+    G.Prisoners[Index].Falling := True;
+    AddLog(G, PrisonerName(Index) + ' falls through the charged monster''s pit.');
+    ResolveChargeAftermath := True;
+    Exit;
+  end;
+
+  ResolveChargeAftermath := ResolveMonsterEscape(G, Index,
+    'Charge: choose a scramble direction.', False, 0, 0);
 end;
 
 function ResolveLandingMonster(var G: TGameState; Index: Byte): Boolean;
 var
   Scheduled: TBoolGrid;
+  LandingX, LandingY: Byte;
+  LandedOnMonster: Boolean;
 begin
   ResolveLandingMonster := True;
   G.PendingLandingMonster := False;
+  LandingX := G.Prisoners[Index].X;
+  LandingY := G.Prisoners[Index].Y;
+  LandedOnMonster := PrisonerOnMonster(G, Index);
   BuildLandingTriggeredMonsters(G, Index, Scheduled);
   ResolveMonsterHits(G, Scheduled);
 
-  if PrisonerOnMonster(G, Index) then
-    if not ResolveMonsterEscape(G, Index, 'Landing hit: choose a scramble direction.') then
+  if LandedOnMonster then
+    if not ResolveMonsterEscape(G, Index, 'Landing hit: choose a scramble direction.',
+      True, LandingX, LandingY) then
     begin
       ResolveLandingMonster := False;
       Exit;
@@ -294,7 +338,7 @@ begin
 end;
 
 procedure PostActionUpdate(var G: TGameState; const BeforeMoveState, AfterMoveState: TGameState;
-  Index, OldX, OldY: Byte; DidMove: Boolean);
+  Index, OldX, OldY: Byte; DidMove, DidCharge: Boolean);
 var
   RefreshBoard: Boolean;
   Scheduled: TBoolGrid;
@@ -311,9 +355,16 @@ begin
     illuminated or darkness removes any queued monster. }
   ResolveMonsterHits(G, Scheduled);
 
-  if DidMove and PrisonerOnMonster(G, Index) then
+  if DidCharge then
   begin
-    if not ResolveMonsterEscape(G, Index, 'Monster hit: choose a scramble direction.') then
+    if not ResolveChargeAftermath(G, Index, AfterMoveState.Prisoners[Index].X,
+      AfterMoveState.Prisoners[Index].Y) then
+      Exit;
+  end
+  else if DidMove and PrisonerOnMonster(G, Index) then
+  begin
+    if not ResolveMonsterEscape(G, Index, 'Monster hit: choose a scramble direction.',
+      False, 0, 0) then
       Exit;
   end;
 
@@ -336,6 +387,7 @@ var
   Dir: TDirection;
   Done: Boolean;
   DidMove: Boolean;
+  DidCharge: Boolean;
   OldX, OldY: Byte;
   BeforeMoveState, AfterMoveState: TGameState;
 begin
@@ -356,6 +408,7 @@ begin
 
   Done := False;
   DidMove := False;
+  DidCharge := False;
   OldX := G.Prisoners[Index].X;
   OldY := G.Prisoners[Index].Y;
   BeforeMoveState := G;
@@ -427,6 +480,7 @@ begin
               if MovePrisoner(G, Index, Dir) then
               begin
                 DidMove := True;
+                DidCharge := True;
                 AfterMoveState := G;
                 Done := True;
               end
@@ -450,7 +504,8 @@ begin
 
   if Done then
   begin
-    PostActionUpdate(G, BeforeMoveState, AfterMoveState, Index, OldX, OldY, DidMove);
+    PostActionUpdate(G, BeforeMoveState, AfterMoveState, Index, OldX, OldY,
+      DidMove, DidCharge);
     ResolveOneAction := True;
   end;
 end;
