@@ -390,6 +390,232 @@ begin
   Check(G.LostGates = 1, 'gate replaced by a staying wax eater is counted lost');
 end;
 
+procedure TestMonsterTriggerGeometry;
+var
+  G, BeforeG, AfterG: TGameState;
+  Scheduled, Resolved: TBoolGrid;
+  Victims: Byte;
+begin
+  { Moving along a wax eater's corridor triggers it and leaves the moving
+    prisoner in the resolved line of attack. }
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].X := 2;
+  G.Prisoners[0].Y := 2;
+  PutCell(G, 0, 2, tkCross, 0, ftMonster, []);
+  PutCell(G, 1, 2, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 2, tkCross, 0, ftNone, []);
+  PutCell(G, 3, 2, tkCross, 0, ftNone, []);
+  RebuildOccupancy(G);
+  BeforeG := G;
+  Check(MovePrisoner(G, 0, dirEast),
+    'prisoner moves along a wax eater corridor');
+  AfterG := G;
+  BuildMoveTriggeredMonsters(BeforeG, AfterG, 0, 2, 2, Scheduled);
+  Check(Scheduled[0, 2],
+    'moving along a wax eater corridor triggers the monster');
+  Scheduled[0, 2] := False;
+  FillChar(Resolved, SizeOf(Resolved), 0);
+  Resolved[0, 2] := True;
+  Victims := MonsterVictimMaskAndChains(AfterG, 0, 2, Scheduled, Resolved);
+  Check((Victims and 1) <> 0,
+    'prisoner remaining in the corridor is hit');
+
+  { Entering a visible corridor from the side also triggers the monster. }
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].X := 2;
+  G.Prisoners[0].Y := 1;
+  PutCell(G, 0, 2, tkCross, 0, ftMonster, []);
+  PutCell(G, 1, 2, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 1, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 2, tkCross, 0, ftNone, []);
+  RebuildOccupancy(G);
+  BeforeG := G;
+  Check(MovePrisoner(G, 0, dirSouth),
+    'prisoner moves into a wax eater corridor');
+  AfterG := G;
+  BuildMoveTriggeredMonsters(BeforeG, AfterG, 0, 2, 1, Scheduled);
+  Check(Scheduled[0, 2],
+    'moving into a wax eater corridor triggers the monster');
+  Scheduled[0, 2] := False;
+  FillChar(Resolved, SizeOf(Resolved), 0);
+  Resolved[0, 2] := True;
+  Victims := MonsterVictimMaskAndChains(AfterG, 0, 2, Scheduled, Resolved);
+  Check((Victims and 1) <> 0,
+    'prisoner entering the corridor is hit');
+
+  { Leaving the line still triggers the monster, but the attack uses current
+    positions.  The mover escapes while another prisoner in line is hit. }
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].X := 2;
+  G.Prisoners[0].Y := 2;
+  G.Prisoners[1].Alive := True;
+  G.Prisoners[1].Started := True;
+  G.Prisoners[1].Lit := True;
+  G.Prisoners[1].X := 3;
+  G.Prisoners[1].Y := 2;
+  PutCell(G, 0, 2, tkCross, 0, ftMonster, []);
+  PutCell(G, 1, 2, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 1, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 2, tkCross, 0, ftNone, []);
+  PutCell(G, 3, 2, tkCross, 0, ftNone, []);
+  RebuildOccupancy(G);
+  BeforeG := G;
+  Check(MovePrisoner(G, 0, dirNorth),
+    'prisoner moves sideways out of a wax eater corridor');
+  AfterG := G;
+  BuildMoveTriggeredMonsters(BeforeG, AfterG, 0, 2, 2, Scheduled);
+  Check(Scheduled[0, 2],
+    'moving out of a wax eater corridor still triggers the monster');
+  Scheduled[0, 2] := False;
+  FillChar(Resolved, SizeOf(Resolved), 0);
+  Resolved[0, 2] := True;
+  Victims := MonsterVictimMaskAndChains(AfterG, 0, 2, Scheduled, Resolved);
+  Check(((Victims and 1) = 0) and ((Victims and 2) <> 0),
+    'side-step evades the hit while a prisoner still in line is struck');
+
+  { Wax eater sight follows the toroidal board edge. }
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].X := 4;
+  G.Prisoners[0].Y := 0;
+  PutCell(G, 0, 0, tkCross, 0, ftMonster, []);
+  PutCell(G, 4, 0, tkCross, 0, ftNone, []);
+  PutCell(G, 5, 0, tkCross, 0, ftNone, []);
+  RebuildOccupancy(G);
+  BeforeG := G;
+  Check(MovePrisoner(G, 0, dirEast),
+    'prisoner moves in a corridor crossing the board edge');
+  AfterG := G;
+  BuildMoveTriggeredMonsters(BeforeG, AfterG, 0, 4, 0, Scheduled);
+  Check(Scheduled[0, 0],
+    'wax eater line of sight triggers across the wrapped edge');
+  Scheduled[0, 0] := False;
+  FillChar(Resolved, SizeOf(Resolved), 0);
+  Resolved[0, 0] := True;
+  Victims := MonsterVictimMaskAndChains(AfterG, 0, 0, Scheduled, Resolved);
+  Check((Victims and 1) <> 0,
+    'wrapped wax eater attack hits the prisoner');
+
+  { Gaps, walls, and pits each stop the attack trace. }
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].X := 2;
+  G.Prisoners[0].Y := 2;
+  PutCell(G, 0, 2, tkCross, 0, ftMonster, []);
+  PutCell(G, 2, 2, tkCross, 0, ftNone, []);
+  FillChar(Scheduled, SizeOf(Scheduled), 0);
+  FillChar(Resolved, SizeOf(Resolved), 0);
+  Resolved[0, 2] := True;
+  Victims := MonsterVictimMaskAndChains(G, 0, 2, Scheduled, Resolved);
+  Check(Victims = 0, 'an empty gap blocks a wax eater attack');
+
+  PutCell(G, 1, 2, tkStraight, 0, ftNone, []);
+  FillChar(Scheduled, SizeOf(Scheduled), 0);
+  Victims := MonsterVictimMaskAndChains(G, 0, 2, Scheduled, Resolved);
+  Check(Victims = 0, 'a disconnected wall blocks a wax eater attack');
+
+  PutCell(G, 1, 2, tkPit, 0, ftNone, []);
+  FillChar(Scheduled, SizeOf(Scheduled), 0);
+  Victims := MonsterVictimMaskAndChains(G, 0, 2, Scheduled, Resolved);
+  Check(Victims = 0, 'a pit blocks a wax eater attack');
+
+  { Moving from a crumbling tile forms a pit after the monster is triggered.
+    The new pit then shields the prisoner from the resolved attack. }
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].X := 2;
+  G.Prisoners[0].Y := 2;
+  PutCell(G, 0, 2, tkCross, 0, ftMonster, []);
+  PutCell(G, 1, 2, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 2, tkStraight, 1, ftCrumbleArmed, []);
+  PutCell(G, 3, 2, tkCross, 0, ftNone, []);
+  RebuildOccupancy(G);
+  BeforeG := G;
+  Check(MovePrisoner(G, 0, dirEast),
+    'prisoner escapes a wax eater line from crumbling stone');
+  AfterG := G;
+  Check(AfterG.Board[2, 2].Kind = tkPit,
+    'movement leaves a pit in the former attack corridor');
+  BuildMoveTriggeredMonsters(BeforeG, AfterG, 0, 2, 2, Scheduled);
+  Check(Scheduled[0, 2],
+    'wax eater is triggered from the pre-collapse corridor');
+  Scheduled[0, 2] := False;
+  FillChar(Resolved, SizeOf(Resolved), 0);
+  Resolved[0, 2] := True;
+  Victims := MonsterVictimMaskAndChains(AfterG, 0, 2, Scheduled, Resolved);
+  Check((Victims and 1) = 0,
+    'new pit blocks the resolved attack and protects the mover');
+end;
+
+procedure TestMonsterHitPenalties;
+var
+  G: TGameState;
+begin
+  ResetState(G);
+  G.Phase := gpMaze;
+  G.DrawsRemaining := 10;
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].Nerve := 1;
+  ApplyMonsterHit(G, 0, 1, False);
+  Check((G.DrawsRemaining = 7) and (not G.Prisoners[0].Lit),
+    'unblocked wax eater hit discards three tiles and causes lights out');
+  Check(G.Prisoners[0].Nerve = 1,
+    'unblocked wax eater hit does not spend nerve');
+
+  ResetState(G);
+  G.Phase := gpMaze;
+  G.DrawsRemaining := 10;
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].Nerve := 1;
+  ApplyMonsterHit(G, 0, 1, True);
+  Check((G.DrawsRemaining = 8) and (not G.Prisoners[0].Lit),
+    'blocking with nerve reduces a wax eater hit to two tiles');
+  Check(G.Prisoners[0].Nerve = 0,
+    'blocking a wax eater hit spends one nerve');
+
+  ResetState(G);
+  G.Phase := gpMaze;
+  G.DrawsRemaining := 10;
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  ApplyMonsterHit(G, 0, 1, False);
+  ApplyMonsterHit(G, 0, 1, False);
+  Check(G.DrawsRemaining = 4,
+    'two wax eater hits each discard their full three-tile penalty');
+
+  ResetState(G);
+  G.Phase := gpMaze;
+  G.DrawsRemaining := 2;
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  ApplyMonsterHit(G, 0, 1, False);
+  Check(G.DrawsRemaining = 0,
+    'wax eater penalty discards every remaining tile without underflow');
+  CheckPhaseTransitions(G);
+  Check(G.Phase = gpFinal,
+    'exhausting the stack during an attack begins Final Flickers');
+end;
+
 procedure TestMonsterAftermath;
 var
   G: TGameState;
@@ -695,6 +921,8 @@ begin
   TestRelitCandleExpansion;
   TestStayNerveRules;
   TestMonsterChainResolution;
+  TestMonsterTriggerGeometry;
+  TestMonsterHitPenalties;
   TestMonsterAftermath;
   TestFallingLanding;
   TestUnclaimedKeyOnArmedTile;

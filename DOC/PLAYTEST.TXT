@@ -14,6 +14,10 @@ Automated baseline: run BUILD\TEST.BAT and confirm all core regression tests pas
    With an exhausted stack and an empty landing space, confirm re-entry is impossible.
    When the selected row/column is full, confirm an existing tile can be selected.
 7. Move into line of sight of a monster and confirm lights-out plus draw loss.
+   Move along, into, and sideways out of its line; confirm all three trigger it,
+   but a sideways escape is not struck if it leaves the attack corridor.
+   Confirm attacks wrap across board edges and stop at gaps, walls, and pits.
+   Compare an unblocked hit with a Nerve block: they discard three and two tiles.
    Connect two wax eaters, trigger one, and confirm each attacks only once.
    Confirm the full chain resolves before darkness removes extinguished tiles.
    Scramble onto a Key or crumble tile and confirm its entry effect resolves.
