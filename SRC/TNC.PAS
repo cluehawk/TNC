@@ -94,7 +94,7 @@ end;
 procedure ResolveKeyPass(var G: TGameState; Index: Byte);
 var
   Eligible: TBoolGrid;
-  Count: Byte;
+  Count, RecipientMask, RecipientCount, Recipient: Byte;
   SelX, SelY: Byte;
 begin
   BuildKeyPassTargets(G, Index, Eligible, Count);
@@ -105,7 +105,21 @@ begin
   end;
 
   PromptSelectBoardCell(G, Eligible, 'Pass the key to which adjacent prisoner?', SelX, SelY);
-  if not PassKeyToCell(G, Index, SelX, SelY) then
+  BuildKeyPassRecipientMask(G, Index, SelX, SelY,
+    RecipientMask, RecipientCount);
+  if RecipientCount = 1 then
+  begin
+    if not PassKeyToCell(G, Index, SelX, SelY) then
+      AddLog(G, 'No key pass was completed.');
+  end
+  else if RecipientCount > 1 then
+  begin
+    Recipient := PromptSelectPrisoner(G, RecipientMask,
+      'Several prisoners share that Gate. Who receives the key?');
+    if not PassKeyToPrisoner(G, Index, Recipient) then
+      AddLog(G, 'No key pass was completed.');
+  end
+  else
     AddLog(G, 'No key pass was completed.');
 end;
 

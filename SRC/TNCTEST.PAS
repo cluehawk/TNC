@@ -1057,6 +1057,217 @@ begin
     'forced scramble arms an entered crumble tile');
 end;
 
+procedure TestGateOccupancy;
+var
+  G: TGameState;
+begin
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].Lit := True;
+  G.Prisoners[0].X := 1;
+  G.Prisoners[0].Y := 1;
+  G.Prisoners[1].Alive := True;
+  G.Prisoners[1].Started := True;
+  G.Prisoners[1].Lit := True;
+  G.Prisoners[1].X := 2;
+  G.Prisoners[1].Y := 1;
+  PutCell(G, 1, 1, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 1, tkCross, 0, ftNone, []);
+  RebuildOccupancy(G);
+  Check(not CanMoveDirection(G, 0, dirEast),
+    'occupied ordinary passage rejects another prisoner');
+  Check(not MovePrisoner(G, 0, dirEast),
+    'ordinary passage occupancy cannot be bypassed by movement');
+
+  G.Board[2, 1].Feature := ftGate;
+  Check(CanMoveDirection(G, 0, dirEast),
+    'occupied Gate accepts another prisoner');
+  Check(MovePrisoner(G, 0, dirEast),
+    'normal movement may join a prisoner on a Gate');
+  RebuildOccupancy(G);
+  Check(MovePrisoner(G, 0, dirWest),
+    'one prisoner may leave a shared Gate');
+  RebuildOccupancy(G);
+  Check((G.Prisoners[1].X = 2) and (G.Prisoners[1].Y = 1) and
+        (cfOccupied in G.Board[2, 1].Flags),
+    'Gate remains occupied while another prisoner stays behind');
+
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].X := 1;
+  G.Prisoners[0].Y := 1;
+  G.Prisoners[1].Alive := True;
+  G.Prisoners[1].Started := True;
+  G.Prisoners[1].X := 2;
+  G.Prisoners[1].Y := 1;
+  PutCell(G, 1, 1, tkCross, 0, ftMonster, []);
+  PutCell(G, 2, 1, tkCross, 0, ftGate, []);
+  RebuildOccupancy(G);
+  Check(CanLandingScrambleDirection(G, 0, dirEast),
+    'forced scramble may target an occupied Gate');
+  Check(ScrambleLandingPrisoner(G, 0, dirEast) and
+        (G.Prisoners[0].X = 2) and (G.Prisoners[0].Y = 1),
+    'forced scramble joins prisoners on a Gate');
+end;
+
+procedure TestStackedGateKeyPassChoice;
+var
+  G: TGameState;
+  Eligible: TBoolGrid;
+  Count, RecipientMask, RecipientCount: Byte;
+begin
+  ResetState(G);
+  G.Prisoners[0].Alive := True;
+  G.Prisoners[0].Started := True;
+  G.Prisoners[0].HasKey := True;
+  G.Prisoners[0].X := 1;
+  G.Prisoners[0].Y := 2;
+  G.Prisoners[1].Alive := True;
+  G.Prisoners[1].Started := True;
+  G.Prisoners[1].X := 2;
+  G.Prisoners[1].Y := 2;
+  G.Prisoners[2].Alive := True;
+  G.Prisoners[2].Started := True;
+  G.Prisoners[2].X := 2;
+  G.Prisoners[2].Y := 2;
+  PutCell(G, 1, 2, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 2, tkCross, 0, ftGate, []);
+  RebuildOccupancy(G);
+
+  BuildKeyPassTargets(G, 0, Eligible, Count);
+  Check((Count = 1) and Eligible[2, 2],
+    'stacked Gate appears once in key-pass board targets');
+  BuildKeyPassRecipientMask(G, 0, 2, 2, RecipientMask, RecipientCount);
+  Check((RecipientCount = 2) and (RecipientMask = 6),
+    'all eligible prisoners on a stacked Gate are offered as recipients');
+  Check(not PassKeyToCell(G, 0, 2, 2),
+    'ambiguous stacked-Gate key pass requires a prisoner choice');
+  Check(PassKeyToPrisoner(G, 0, 2),
+    'key can be passed to the selected prisoner on a stacked Gate');
+  Check((not G.Prisoners[0].HasKey) and
+        (not G.Prisoners[1].HasKey) and G.Prisoners[2].HasKey,
+    'selected Gate recipient, rather than lowest index, receives the key');
+end;
+
+procedure TestGateVictorySequencing;
+var
+  G: TGameState;
+  I, Y: Byte;
+begin
+  ResetState(G);
+  PrepareFinalPrisoners(G);
+  G.Prisoners[0].X := 2;
+  G.Prisoners[0].Y := 1;
+  G.Prisoners[1].X := 1;
+  G.Prisoners[1].Y := 2;
+  G.Prisoners[2].X := 2;
+  G.Prisoners[2].Y := 3;
+  G.Prisoners[3].X := 3;
+  G.Prisoners[3].Y := 2;
+  PutCell(G, 2, 1, tkCross, 0, ftNone, []);
+  PutCell(G, 1, 2, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 3, tkCross, 0, ftNone, []);
+  PutCell(G, 3, 2, tkCross, 0, ftNone, []);
+  PutCell(G, 2, 2, tkCross, 0, ftGate, []);
+  RebuildOccupancy(G);
+
+  Check(MovePrisoner(G, 0, dirSouth),
+    'first keyed prisoner enters the shared Gate');
+  RebuildOccupancy(G);
+  CheckWinLoss(G);
+  Check(G.Phase = gpFinal, 'Gate does not open for only one prisoner');
+  Check(MovePrisoner(G, 1, dirEast),
+    'second keyed prisoner enters the occupied Gate');
+  RebuildOccupancy(G);
+  CheckWinLoss(G);
+  Check(G.Phase = gpFinal, 'Gate does not open for only two prisoners');
+  Check(MovePrisoner(G, 2, dirNorth),
+    'third keyed prisoner enters the occupied Gate');
+  RebuildOccupancy(G);
+  CheckWinLoss(G);
+  Check(G.Phase = gpFinal, 'Gate does not open for only three prisoners');
+  Check(MovePrisoner(G, 3, dirWest),
+    'fourth keyed prisoner enters the occupied Gate');
+  RebuildOccupancy(G);
+  CheckWinLoss(G);
+  Check(G.Phase = gpWin,
+    'victory occurs when the fourth keyed prisoner reaches the same Gate');
+
+  ResetState(G);
+  PrepareFinalPrisoners(G);
+  G.Phase := gpMaze;
+  G.FeatureKeys := 1;
+  for I := 0 to PrisonerCount - 1 do
+  begin
+    G.Prisoners[I].X := 2;
+    G.Prisoners[I].Y := 2;
+  end;
+  G.Prisoners[0].HasKey := False;
+  PutCell(G, 2, 2, tkCross, 0, ftGate, []);
+  RebuildOccupancy(G);
+  CheckWinLoss(G);
+  Check(G.Phase = gpMaze,
+    'four prisoners on one Gate do not win while a Key is missing');
+
+  ResetState(G);
+  PrepareFinalPrisoners(G);
+  G.Phase := gpMaze;
+  G.Prisoners[0].X := 1;
+  G.Prisoners[0].Y := 1;
+  G.Prisoners[1].X := 1;
+  G.Prisoners[1].Y := 1;
+  G.Prisoners[2].X := 4;
+  G.Prisoners[2].Y := 4;
+  G.Prisoners[3].X := 4;
+  G.Prisoners[3].Y := 4;
+  PutCell(G, 1, 1, tkCross, 0, ftGate, []);
+  PutCell(G, 4, 4, tkCross, 0, ftGate, []);
+  RebuildOccupancy(G);
+  CheckWinLoss(G);
+  Check(G.Phase = gpMaze,
+    'keyed prisoners split between Gates do not win');
+
+  ResetState(G);
+  PrepareFinalPrisoners(G);
+  for I := 1 to PrisonerCount - 1 do
+  begin
+    G.Prisoners[I].X := 2;
+    G.Prisoners[I].Y := 2;
+  end;
+  G.Prisoners[0].X := 2;
+  G.Prisoners[0].Y := 2;
+  BeginPrisonerFall(G, 0);
+  Check(ChooseFallEdge(G, 0, dirNorth),
+    'falling keyed prisoner locks a Gate landing line');
+  for Y := 0 to BoardH - 1 do
+    PutCell(G, 2, Y, tkPit, 0, ftNone, []);
+  PutCell(G, 2, 2, tkCross, 0, ftGate, []);
+  RebuildOccupancy(G);
+  Check(LandFallingPrisoner(G, 0, 2, 2),
+    'full-line re-entry may land on an occupied Gate');
+  RebuildOccupancy(G);
+  CheckWinLoss(G);
+  Check(G.Phase = gpWin,
+    'Gate victory resolves immediately after the fourth prisoner lands');
+
+  ResetState(G);
+  PrepareFinalPrisoners(G);
+  G.Phase := gpMaze;
+  for I := 0 to PrisonerCount - 1 do
+  begin
+    G.Prisoners[I].X := 2;
+    G.Prisoners[I].Y := 2;
+  end;
+  G.Prisoners[3].Alive := False;
+  PutCell(G, 2, 2, tkCross, 0, ftGate, []);
+  RebuildOccupancy(G);
+  CheckWinLoss(G);
+  Check(G.Phase = gpMaze,
+    'victory predicate requires every prisoner to be alive');
+end;
+
 procedure TestFinalFlickerSelection;
 var
   G: TGameState;
@@ -1190,6 +1401,9 @@ begin
   TestUnclaimedKeyOnArmedTile;
   TestPassThenClaimStandingKey;
   TestScrambleEntryFeature;
+  TestGateOccupancy;
+  TestStackedGateKeyPassChoice;
+  TestGateVictorySequencing;
   TestFinalFlickerSelection;
   TestFinalIsolationLoss;
 

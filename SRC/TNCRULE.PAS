@@ -20,6 +20,9 @@ function CanPassKey(const G: TGameState; Index: Byte): Boolean;
 procedure BuildKeyPassTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
   var Count: Byte);
 function PassKeyToCell(var G: TGameState; Index, X, Y: Byte): Boolean;
+procedure BuildKeyPassRecipientMask(const G: TGameState; Index, X, Y: Byte;
+  var EligibleMask, Count: Byte);
+function PassKeyToPrisoner(var G: TGameState; Index, Recipient: Byte): Boolean;
 function HasAnyReEntry(const G: TGameState; Index: Byte): Boolean;
 function CanReEnterDirection(const G: TGameState; Index: Byte; Dir: TDirection): Boolean;
 function ResolveFallingEntry(var G: TGameState; Index: Byte; Dir: TDirection): Boolean;
@@ -497,45 +500,62 @@ begin
     AddLog(G, PrisonerName(Index) + ' ends the turn at full nerve.');
 end;
 
-procedure BuildKeyPassTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
-  var Count: Byte);
+function CanPassKeyBetween(const G: TGameState; Index, Recipient: Byte): Boolean;
 var
-  X, Y, NX, NY, I: Byte;
+  X, Y, RX, RY: Byte;
   D: TDirection;
 begin
-  FillChar(Eligible, SizeOf(Eligible), 0);
-  Count := 0;
-
-  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) or
-     (not G.Prisoners[Index].Started) then
+  CanPassKeyBetween := False;
+  if (Index >= PrisonerCount) or (Recipient >= PrisonerCount) or
+     (Index = Recipient) then
     Exit;
-  if not G.Prisoners[Index].HasKey then
+  if G.Prisoners[Index].Falling or (not G.Prisoners[Index].Alive) or
+     (not G.Prisoners[Index].Started) or
+     (not G.Prisoners[Index].HasKey) then
+    Exit;
+  if G.Prisoners[Recipient].Falling or
+     (not G.Prisoners[Recipient].Alive) or
+     (not G.Prisoners[Recipient].Started) or
+     G.Prisoners[Recipient].HasKey then
     Exit;
 
   X := G.Prisoners[Index].X;
   Y := G.Prisoners[Index].Y;
-  if not IsPassable(G.Board[X, Y]) then
+  RX := G.Prisoners[Recipient].X;
+  RY := G.Prisoners[Recipient].Y;
+  if (not IsPassable(G.Board[X, Y])) or
+     (not IsPassable(G.Board[RX, RY])) then
     Exit;
 
   for D := dirNorth to dirWest do
-    if CellOpen(G.Board[X, Y], D) then
+    if (WrapX(Integer(X) + DirX[D]) = RX) and
+       (WrapY(Integer(Y) + DirY[D]) = RY) and
+       CellOpen(G.Board[X, Y], D) and
+       CellOpen(G.Board[RX, RY], OppositeDir(D)) then
     begin
-      NX := WrapX(Integer(X) + DirX[D]);
-      NY := WrapY(Integer(Y) + DirY[D]);
-      if IsPassable(G.Board[NX, NY]) and CellOpen(G.Board[NX, NY], OppositeDir(D)) then
-        for I := 0 to PrisonerCount - 1 do
-          if (I <> Index) and G.Prisoners[I].Alive and G.Prisoners[I].Started and
-             (not G.Prisoners[I].Falling) and
-             (not G.Prisoners[I].HasKey) and
-             (G.Prisoners[I].X = NX) and (G.Prisoners[I].Y = NY) then
-          begin
-            if not Eligible[NX, NY] then
-            begin
-              Eligible[NX, NY] := True;
-              Inc(Count);
-            end;
-            Break;
-          end;
+      CanPassKeyBetween := True;
+      Exit;
+    end;
+end;
+
+procedure BuildKeyPassTargets(const G: TGameState; Index: Byte; var Eligible: TBoolGrid;
+  var Count: Byte);
+var
+  I, X, Y: Byte;
+begin
+  FillChar(Eligible, SizeOf(Eligible), 0);
+  Count := 0;
+
+  for I := 0 to PrisonerCount - 1 do
+    if CanPassKeyBetween(G, Index, I) then
+    begin
+      X := G.Prisoners[I].X;
+      Y := G.Prisoners[I].Y;
+      if not Eligible[X, Y] then
+      begin
+        Eligible[X, Y] := True;
+        Inc(Count);
+      end;
     end;
 end;
 
@@ -548,35 +568,54 @@ begin
   CanPassKey := Count > 0;
 end;
 
-function PassKeyToCell(var G: TGameState; Index, X, Y: Byte): Boolean;
+procedure BuildKeyPassRecipientMask(const G: TGameState; Index, X, Y: Byte;
+  var EligibleMask, Count: Byte);
 var
   I: Byte;
-  Eligible: TBoolGrid;
-  Count: Byte;
 begin
-  PassKeyToCell := False;
-  if not G.Prisoners[Index].HasKey then
-    Exit;
+  EligibleMask := 0;
+  Count := 0;
   if (X >= BoardW) or (Y >= BoardH) then
     Exit;
 
-  BuildKeyPassTargets(G, Index, Eligible, Count);
-  if (Count = 0) or (not Eligible[X, Y]) then
+  for I := 0 to PrisonerCount - 1 do
+    if CanPassKeyBetween(G, Index, I) and
+       (G.Prisoners[I].X = X) and (G.Prisoners[I].Y = Y) then
+    begin
+      EligibleMask := EligibleMask or (1 shl I);
+      Inc(Count);
+    end;
+end;
+
+function PassKeyToPrisoner(var G: TGameState; Index, Recipient: Byte): Boolean;
+begin
+  PassKeyToPrisoner := False;
+  if not CanPassKeyBetween(G, Index, Recipient) then
+    Exit;
+
+  G.Prisoners[Index].HasKey := False;
+  G.Prisoners[Recipient].HasKey := True;
+  AddLog(G, PrisonerName(Index) + ' passes a key to ' +
+    PrisonerName(Recipient) + '.');
+  { Taking a key is free.  If the giver is standing on another Key tile,
+    the newly freed hand claims that key immediately. }
+  HandleEntryFeature(G, Index);
+  PassKeyToPrisoner := True;
+end;
+
+function PassKeyToCell(var G: TGameState; Index, X, Y: Byte): Boolean;
+var
+  I, EligibleMask, Count: Byte;
+begin
+  PassKeyToCell := False;
+  BuildKeyPassRecipientMask(G, Index, X, Y, EligibleMask, Count);
+  if Count <> 1 then
     Exit;
 
   for I := 0 to PrisonerCount - 1 do
-    if (I <> Index) and G.Prisoners[I].Alive and G.Prisoners[I].Started and
-       (not G.Prisoners[I].Falling) and
-       (not G.Prisoners[I].HasKey) and
-       (G.Prisoners[I].X = X) and (G.Prisoners[I].Y = Y) then
+    if (EligibleMask and (1 shl I)) <> 0 then
     begin
-      G.Prisoners[Index].HasKey := False;
-      G.Prisoners[I].HasKey := True;
-      AddLog(G, PrisonerName(Index) + ' passes a key to ' + PrisonerName(I) + '.');
-      { Taking a key is free.  If the giver is standing on another Key tile,
-        the newly freed hand claims that key immediately. }
-      HandleEntryFeature(G, Index);
-      PassKeyToCell := True;
+      PassKeyToCell := PassKeyToPrisoner(G, Index, I);
       Exit;
     end;
 end;
@@ -1450,7 +1489,8 @@ var
   GX, GY: Byte;
 begin
   AllOnSameGate := False;
-  if (not G.Prisoners[0].Started) or G.Prisoners[0].Falling then
+  if (not G.Prisoners[0].Alive) or (not G.Prisoners[0].Started) or
+     G.Prisoners[0].Falling then
     Exit;
   GX := G.Prisoners[0].X;
   GY := G.Prisoners[0].Y;
@@ -1460,7 +1500,8 @@ begin
     Exit;
 
   for I := 1 to PrisonerCount - 1 do
-    if (not G.Prisoners[I].Started) or G.Prisoners[I].Falling or
+    if (not G.Prisoners[I].Alive) or (not G.Prisoners[I].Started) or
+       G.Prisoners[I].Falling or
        (G.Prisoners[I].X <> GX) or
        (G.Prisoners[I].Y <> GY) then
       Exit;

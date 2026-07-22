@@ -20,7 +20,8 @@ Implemented Special Rules
 -------------------------
 - Key tiles grant one key automatically.
 - An already-keyed prisoner leaves a newly entered Key on its armed crumbling tile.
-- Gate tile wins only when all four keyed prisoners stand on the same gate.
+- Gate tiles are the only spaces that permit multiple prisoners; victory occurs
+  only when all four live, keyed prisoners occupy the same Gate simultaneously.
 - Crumbling tiles arm on entry, drop to pits when left, and cause falling if stayed on.
 - Prisoners choose an edge as soon as they Fall; that choice is locked while
   the maze changes, and re-entry next turn uses its original row or column.
@@ -51,4 +52,3 @@ Simplifications
 - The core solo draw stack uses the exact 76-tile inventory after removing two Keys.
 - Only the four-prisoner solo/core rules are implemented.
 - Advanced monster types are not implemented.
-- Gate tiles are the only tiles that allow multiple prisoners.

@@ -13,6 +13,8 @@ procedure GetAction(var G: TGameState; var Cmd: Char; var Dir: TDirection);
 function PromptYesNo(const Prompt: string): Boolean;
 procedure PromptSelectBoardCell(const G: TGameState; const Eligible: TBoolGrid;
   const Prompt: string; var SelX, SelY: Byte);
+function PromptSelectPrisoner(const G: TGameState; EligibleMask: Byte;
+  const Prompt: string): Byte;
 procedure WaitForKey;
 procedure WriteAt(X, Y: Byte; S: string);
 
@@ -535,6 +537,37 @@ begin
       until Eligible[SelX, SelY];
     end;
   until Ch = #13;
+end;
+
+function PromptSelectPrisoner(const G: TGameState; EligibleMask: Byte;
+  const Prompt: string): Byte;
+var
+  I, Selected: Byte;
+  Ch: Char;
+  Choices: string;
+begin
+  Choices := 'Choose prisoner:';
+  for I := 0 to PrisonerCount - 1 do
+    if (EligibleMask and (1 shl I)) <> 0 then
+      Choices := Choices + ' ' + Chr(Ord('1') + I);
+
+  repeat
+    DrawGame(G);
+    WriteAt(3, 23, '                                                                            ');
+    WriteAt(3, 24, '                                                                            ');
+    WriteAt(3, 23, Prompt);
+    WriteAt(3, 24, Choices);
+    Ch := ReadKey;
+    if (Ch >= '1') and (Ch <= '4') then
+    begin
+      Selected := Ord(Ch) - Ord('1');
+      if (EligibleMask and (1 shl Selected)) <> 0 then
+      begin
+        PromptSelectPrisoner := Selected;
+        Exit;
+      end;
+    end;
+  until False;
 end;
 
 procedure WaitForKey;

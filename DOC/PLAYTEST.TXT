@@ -47,4 +47,10 @@ Automated baseline: run BUILD\TEST.BAT and confirm all core regression tests pas
     reachable by all four Prisoners.
 12. Carry a Key across another Key tile and confirm the unclaimed Key remains on the armed tile.
     Pass the held Key while still there and confirm the freed hand claims the tile's Key.
-13. Gather keys and stack all four keyed prisoners on a gate to confirm victory.
+13. Confirm an occupied ordinary passage rejects another prisoner, while an occupied
+    Gate accepts normal movement, a forced scramble, and full-line falling re-entry.
+    Move one prisoner away and confirm the others remain on the Gate. With multiple
+    unkeyed prisoners stacked there, pass a Key from an adjacent passage and confirm
+    the intended recipient can be selected. Verify no victory occurs with a missing
+    Key or prisoners split between Gates, then gather all four keyed prisoners on one
+    Gate and confirm victory only when the fourth prisoner arrives.
